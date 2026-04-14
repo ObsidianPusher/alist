@@ -1,7 +1,7 @@
 import { password } from "~/store"
 import { EmptyResp } from "~/types"
-import { r } from "~/utils"
 import { SetUpload, Upload } from "./types"
+import { uploadFsStream } from "~/api/uploads"
 export const StreamUpload: Upload = async (
   uploadPath: string,
   file: File,
@@ -11,15 +11,12 @@ export const StreamUpload: Upload = async (
 ): Promise<Error | undefined> => {
   let oldTimestamp = new Date().valueOf()
   let oldLoaded = 0
-  const resp: EmptyResp = await r.put("/fs/put", file, {
-    headers: {
-      "File-Path": encodeURIComponent(uploadPath),
-      "As-Task": asTask,
-      ...(taskGroup ? { "Task-Group": taskGroup } : {}),
-      "Content-Type": file.type || "application/octet-stream",
-      "Last-Modified": file.lastModified,
-      Password: password(),
-    },
+  const resp: EmptyResp = await uploadFsStream(file, {
+    uploadPath,
+    asTask,
+    taskGroup,
+    password: password(),
+    lastModified: file.lastModified,
     onUploadProgress: (progressEvent) => {
       if (progressEvent.total) {
         const complete =

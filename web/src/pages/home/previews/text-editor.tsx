@@ -5,8 +5,9 @@ import { MonacoEditorLoader } from "~/components/MonacoEditor"
 import { useFetch, useFetchText, useParseText, useRouter, useT } from "~/hooks"
 import { objStore, userCan } from "~/store"
 import { PEmptyResp } from "~/types"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
 import { createShortcut } from "@solid-primitives/keyboard"
+import { saveFsContent } from "~/api/fs-content"
 
 function Editor(props: { data?: string | ArrayBuffer; contentType?: string }) {
   const { colorMode } = useColorMode()
@@ -19,13 +20,7 @@ function Editor(props: { data?: string | ArrayBuffer; contentType?: string }) {
   const [value, setValue] = createSignal(text(encoding()))
   const t = useT()
   const [loading, save] = useFetch(
-    (): PEmptyResp =>
-      r.put("/fs/put", value(), {
-        headers: {
-          "File-Path": encodeURIComponent(pathname()),
-          "Content-Type": props.contentType || "text/plain",
-        },
-      }),
+    (): PEmptyResp => saveFsContent(pathname(), value(), props.contentType),
   )
   createEffect(
     on(encoding, (v) => {

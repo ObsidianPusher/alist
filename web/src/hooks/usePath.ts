@@ -1,4 +1,5 @@
-import axios, { Canceler } from "axios"
+import { Canceler } from "axios"
+import { getFsObject, listFsObjects, newFsListCancelToken } from "~/api/fs"
 import {
   appendObjs,
   password,
@@ -10,8 +11,6 @@ import {
   me,
 } from "~/store"
 import {
-  fsGet,
-  fsList,
   handleRespWithoutNotify,
   log,
   notify,
@@ -66,6 +65,10 @@ function getQueryVariable(name: string): string {
 }
 const IsDirRecord: Record<string, boolean> = {}
 let globalPage = 1
+
+type FolderLoadResult = Awaited<ReturnType<typeof listFsObjects>>["data"]
+type ObjectLoadResult = Awaited<ReturnType<typeof getFsObject>>["data"]
+
 export const getGlobalPage = () => {
   return globalPage
 }
@@ -78,7 +81,7 @@ export const resetGlobalPage = () => {
 }
 export const usePath = () => {
   const { pathname, to } = useRouter()
-  const [, getObj] = useFetch((path: string) => fsGet(path, password()))
+  const [, getObj] = useFetch((path: string) => getFsObject(path, password()))
   const pagination = getPagination()
   if (pagination.type === "pagination" && getQueryVariable("page")) {
     globalPage = parseInt(getQueryVariable("page"))
@@ -94,17 +97,16 @@ export const usePath = () => {
         index: arg?.index,
         size: arg?.size,
       }
-      // setSearchParams(page);
-      return fsList(
-        arg?.path,
-        password(),
-        page.index,
-        page.size,
-        arg?.force,
-        new axios.CancelToken(function executor(c) {
-          cancelList = c
+      return listFsObjects({
+        path: arg?.path,
+        password: password(),
+        page: page.index,
+        perPage: page.size,
+        refresh: arg?.force,
+        cancelToken: newFsListCancelToken((canceler) => {
+          cancelList = canceler
         }),
-      )
+      })
     },
   )
   // set a path must be a dir
@@ -143,21 +145,47 @@ export const usePath = () => {
     handleRespWithoutNotify(
       resp,
       (data) => {
-        ObjStore.setObj(data)
-        ObjStore.setProvider(data.provider)
-        if (data.is_dir) {
-          setPathAs(path)
-          handleFolder(path, globalPage)
-        } else {
-          ObjStore.setReadme(data.readme)
-          ObjStore.setHeader(data.header)
-          ObjStore.setRelated(data.related ?? [])
-          ObjStore.setRawUrl(data.raw_url)
-          ObjStore.setState(State.File)
-        }
+        applyObjectResult(path, data)
       },
       handleErr,
     )
+  }
+
+  const applyObjectResult = (path: string, data: ObjectLoadResult) => {
+    ObjStore.setObj(data)
+    ObjStore.setProvider(data.provider)
+    if (data.is_dir) {
+      setPathAs(path)
+      handleFolder(path, globalPage)
+      return
+    }
+    ObjStore.setReadme(data.readme)
+    ObjStore.setHeader(data.header)
+    ObjStore.setRelated(data.related ?? [])
+    ObjStore.setRawUrl(data.raw_url)
+    ObjStore.setState(State.File)
+  }
+
+  const applyFolderResult = (
+    path: string,
+    data: FolderLoadResult,
+    append: boolean,
+    index?: number,
+  ) => {
+    if (append) {
+      appendObjs(data.content)
+    } else {
+      ObjStore.setObjs(data.content ?? [])
+      ObjStore.setTotal(data.total)
+    }
+    ObjStore.setReadme(data.readme)
+    ObjStore.setHeader(data.header)
+    ObjStore.setWrite(data.write)
+    ObjStore.setProvider(data.provider)
+    ObjStore.setState(State.Folder)
+    if (!(append && (index ?? 1) > 1)) {
+      recoverScroll(path)
+    }
   }
 
   // change enter a folder or turn page or load more
@@ -180,20 +208,7 @@ export const usePath = () => {
     handleRespWithoutNotify(
       resp,
       (data) => {
-        if (append) {
-          appendObjs(data.content)
-        } else {
-          ObjStore.setObjs(data.content ?? [])
-          ObjStore.setTotal(data.total)
-        }
-        ObjStore.setReadme(data.readme)
-        ObjStore.setHeader(data.header)
-        ObjStore.setWrite(data.write)
-        ObjStore.setProvider(data.provider)
-        ObjStore.setState(State.Folder)
-        if (!(append && (index ?? 1) > 1)) {
-          recoverScroll(path)
-        }
+        applyFolderResult(path, data, append, index)
       },
       handleErr,
     )

@@ -13,7 +13,8 @@ import {
 import { createMemo, createSignal, For, Show } from "solid-js"
 import { useT, useFetch } from "~/hooks"
 import { PEmptyResp, TaskInfo } from "~/types"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
+import { operateTask } from "~/api/admin/tasks"
 import { TasksProps } from "./Tasks"
 
 enum TaskStateEnum {
@@ -173,13 +174,13 @@ export const Task = (
   })
   const [operateLoading, operate] = useFetch(
     (): PEmptyResp =>
-      r.post(`/task/${props.type}/${operateName}?tid=${props.id}`),
+      operateTask(props.type, operateName as "pause" | "delete", props.id),
   )
   const [retryLoading, retry] = useFetch(
-    (): PEmptyResp => r.post(`/task/${props.type}/retry?tid=${props.id}`),
+    (): PEmptyResp => operateTask(props.type, "retry", props.id),
   )
   const [resumeLoading, resume] = useFetch(
-    (): PEmptyResp => r.post(`/task/${props.type}/resume?tid=${props.id}`),
+    (): PEmptyResp => operateTask(props.type, "resume", props.id),
   )
   const [deleted, setDeleted] = createSignal(false)
   return (

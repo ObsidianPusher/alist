@@ -1,11 +1,10 @@
 import { Alert, AlertDescription, AlertIcon, Box, Button, HStack, Text } from "@hope-ui/solid"
 import { useNavigate } from "@solidjs/router"
 import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
-import { useLink } from "~/hooks"
-import { getSettingBool, local, objStore } from "~/store"
+import { useLink, useVideoProgress } from "~/hooks"
+import { getSettingBool, local, useCurrentObj, useCurrentObjs } from "~/store"
 import { ObjType } from "~/types"
 import { pathDir, pathJoin, trimBase } from "~/utils"
-import { getVideoProgress, saveVideoProgress } from "~/utils/api"
 import View360, { ControlBar, EquirectProjection } from "@egjs/view360"
 import "@egjs/view360/css/view360.min.css"
 import "./video360.css"
@@ -14,27 +13,39 @@ import { VideoBox } from "./video_box"
 const Preview = () => {
   const navigate = useNavigate()
   const { currentObjLink } = useLink()
+  const currentObj = useCurrentObj()
+  const objs = useCurrentObjs()
   const [autoNext, setAutoNext] = createSignal(false)
   const [err, setErr] = createSignal("")
-  const [resumeVisible, setResumeVisible] = createSignal(false)
-  const [resumeAt, setResumeAt] = createSignal(0)
-  const [resumeApplied, setResumeApplied] = createSignal(false)
   const autoResumeEnabled = () => local["video_auto_resume"] === "true"
   const currentPath = () => trimBase(location.pathname)
+  const {
+    resumeVisible,
+    resumeAt,
+    resumeApplied,
+    setResumeApplied,
+    setResumeVisible,
+    loadResume,
+    persistProgress,
+  } = useVideoProgress(() => ({
+    path: currentPath(),
+    size: currentObj().size,
+    modTime: Date.parse(currentObj().modified) || 0,
+  }))
   let lastReport = 0
   let lastReportedPos = 0
   let viewer: View360 | undefined
   let videoEl: HTMLVideoElement | undefined
 
   const videos = createMemo(() => {
-    const list = objStore.objs.filter((obj) => obj.type === ObjType.VIDEO)
-    if (list.length === 0) return [objStore.obj]
+    const list = objs().filter((obj) => obj.type === ObjType.VIDEO)
+    if (list.length === 0) return [currentObj()]
     return [...list].sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { numeric: true }),
     )
   })
   const currentIndex = createMemo(() =>
-    videos().findIndex((f) => f.name === objStore.obj.name),
+    videos().findIndex((f) => f.name === currentObj().name),
   )
   const hasPrev = createMemo(() => currentIndex() > 0)
   const hasNext = createMemo(
@@ -62,22 +73,12 @@ const Preview = () => {
     videoEl = video
     // Use local /d link for better auth/CORS compatibility in 360 renderer.
     video.src = currentObjLink(true)
-    void (async () => {
-      const resp = await getVideoProgress(currentPath())
-      if (!resp || resp.code !== 200 || !resp.data) return
-      if (resp.data.finished) return
-      if (!Number.isFinite(resp.data.position) || resp.data.position <= 5) return
-      setResumeAt(resp.data.position)
-      setResumeVisible(true)
-    })()
+    void loadResume()
     video.onended = () => {
-      void saveVideoProgress({
-        path: currentPath(),
-        size: objStore.obj.size,
-        mod_time: Date.parse(objStore.obj.modified) || 0,
-        position: Number.isFinite(video.duration) ? video.duration : video.currentTime,
-        duration: Number.isFinite(video.duration) ? video.duration : 0,
-      })
+      void persistProgress(
+        Number.isFinite(video.duration) ? video.duration : video.currentTime,
+        Number.isFinite(video.duration) ? video.duration : 0,
+      )
       if (autoNext()) nextVideo()
     }
     video.onerror = () => {
@@ -107,13 +108,7 @@ const Preview = () => {
       if (ts - lastReport < 10000 && Math.abs(now - lastReportedPos) < 5) return
       lastReport = ts
       lastReportedPos = now
-      void saveVideoProgress({
-        path: currentPath(),
-        size: objStore.obj.size,
-        mod_time: Date.parse(objStore.obj.modified) || 0,
-        position: now,
-        duration: Number.isFinite(video.duration) ? video.duration : 0,
-      })
+      void persistProgress(now, Number.isFinite(video.duration) ? video.duration : 0)
     }
     try {
       viewer = new View360(container, {
@@ -141,7 +136,7 @@ const Preview = () => {
   return (
     <VideoBox
       playlist={videos().map((v) => ({ name: v.name }))}
-      current={objStore.obj.name}
+      current={currentObj().name}
       onSelect={selectVideo}
       hasPrev={hasPrev()}
       hasNext={hasNext()}

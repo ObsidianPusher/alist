@@ -2,18 +2,13 @@ import { Box } from "@hope-ui/solid"
 import { MaybeLoading } from "~/components"
 import { useFetch, useRouter } from "~/hooks"
 import { password } from "~/store"
-import { PResp } from "~/types"
-import { handleResp, r } from "~/utils"
+import { handleResp } from "~/utils"
+import { getAliyunDocPreview } from "~/api/fs-other"
 
 const AliDocPreview = () => {
   const { pathname } = useRouter()
-  const [loading, post] = useFetch(
-    (): PResp<{ access_token: string; preview_url: string }> =>
-      r.post("/fs/other", {
-        path: pathname(),
-        password: password(),
-        method: "doc_preview",
-      }),
+  const [loading, post] = useFetch(() =>
+    getAliyunDocPreview(pathname(), password()),
   )
   const init = async () => {
     const resp = await post()

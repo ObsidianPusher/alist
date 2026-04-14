@@ -7,6 +7,7 @@ import (
 
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/setting"
+	"github.com/alist-org/alist/v3/internal/task"
 	"github.com/alist-org/alist/v3/pkg/utils"
 	"github.com/alist-org/alist/v3/server/common"
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,44 @@ func Favicon(c *gin.Context) {
 
 func Robots(c *gin.Context) {
 	c.String(200, setting.GetStr(conf.RobotsTxt))
+}
+
+func normalizeTaskGroupID(tasks []task.TaskInfoWithCreator, groupID string) string {
+	if groupID != "" || len(tasks) == 0 {
+		return groupID
+	}
+	candidate := tasks[0].GetGroupID()
+	if candidate == "" {
+		return ""
+	}
+	for _, t := range tasks[1:] {
+		if t.GetGroupID() != candidate {
+			return ""
+		}
+	}
+	return candidate
+}
+
+func successTaskResp(
+	c *gin.Context,
+	groupID string,
+	tasks []task.TaskInfoWithCreator,
+	groupName string,
+) {
+	groupID = normalizeTaskGroupID(tasks, groupID)
+	if len(tasks) == 0 {
+		common.SuccessResp(c)
+		return
+	}
+	if groupID != "" {
+		common.SuccessResp(c, gin.H{
+			"task": buildGroupTaskInfo[task.TaskInfoWithCreator](groupID, tasks, groupName),
+		})
+		return
+	}
+	common.SuccessResp(c, gin.H{
+		"tasks": getTaskInfos(tasks),
+	})
 }
 
 func Plist(c *gin.Context) {

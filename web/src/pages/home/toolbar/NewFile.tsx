@@ -1,14 +1,15 @@
 import { createDisclosure } from "@hope-ui/solid"
 import { onCleanup } from "solid-js"
 import { ModalInput } from "~/components"
-import { useFetch, usePath, useRouter } from "~/hooks"
+import { useFetch, useFsAction, useRouter } from "~/hooks"
 import { password } from "~/store"
-import { bus, fsNewFile, handleRespWithNotifySuccess, pathJoin } from "~/utils"
+import { bus, pathJoin } from "~/utils"
+import { createEmptyFileFs } from "~/api/fs-ops"
 
 export const NewFile = () => {
   const { isOpen, onOpen, onClose } = createDisclosure()
-  const [loading, ok] = useFetch(fsNewFile)
-  const { refresh } = usePath()
+  const [loading, ok] = useFetch(createEmptyFileFs)
+  const { submit } = useFsAction()
   const { pathname } = useRouter()
   const handler = (name: string) => {
     if (name === "new_file") {
@@ -27,8 +28,7 @@ export const NewFile = () => {
       loading={loading()}
       onSubmit={async (name) => {
         const resp = await ok(pathJoin(pathname(), name), password())
-        handleRespWithNotifySuccess(resp, () => {
-          refresh()
+        submit(resp, () => {
           onClose()
         })
       }}

@@ -10,7 +10,7 @@ import {
 } from "@hope-ui/solid"
 import { MaybeLoading, FolderChooseInput } from "~/components"
 import { useFetch, useRouter, useT } from "~/hooks"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
 import {
   PEmptyResp,
   PResp,
@@ -19,6 +19,7 @@ import {
   UserPermissions,
   UserVisiblePermissionIndexes,
 } from "~/types"
+import { getUser, saveUser } from "~/api/admin/users"
 import { createStore } from "solid-js/store"
 import { For, Show } from "solid-js"
 
@@ -63,7 +64,7 @@ const AddOrEdit = () => {
     sso_id: "",
   })
   const [userLoading, loadUser] = useFetch(
-    (): PResp<User> => r.get(`/admin/user/get?id=${id}`),
+    (): PResp<User> => getUser(id!),
   )
 
   const initEdit = async () => {
@@ -74,7 +75,7 @@ const AddOrEdit = () => {
     initEdit()
   }
   const [okLoading, ok] = useFetch((): PEmptyResp => {
-    return r.post(`/admin/user/${id ? "update" : "create"}`, user)
+    return saveUser(id, user)
   })
   return (
     <MaybeLoading loading={userLoading()}>

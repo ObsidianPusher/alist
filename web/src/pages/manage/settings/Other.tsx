@@ -3,15 +3,15 @@ import { createSignal, onMount } from "solid-js"
 import { MaybeLoading } from "~/components"
 import { useFetch, useManageTitle, useT, useUtil } from "~/hooks"
 import { Group, SettingItem, PResp } from "~/types"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
+import { listSettingsByGroups, resetSettingToken } from "~/api/admin/settings"
 
 const OtherSettings = () => {
   const t = useT()
   useManageTitle("manage.sidemenu.other")
   const [token, setToken] = createSignal("")
   const [settingsLoading, settingsData] = useFetch(
-    (): PResp<SettingItem[]> =>
-      r.get(`/admin/setting/list?groups=${Group.SINGLE}`),
+    (): PResp<SettingItem[]> => listSettingsByGroups(Group.SINGLE),
   )
   const refresh = async () => {
     const resp = await settingsData()
@@ -22,9 +22,7 @@ const OtherSettings = () => {
   onMount(() => {
     refresh()
   })
-  const [resetTokenLoading, resetToken] = useFetch(
-    (): PResp<string> => r.post("/admin/setting/reset_token"),
-  )
+  const [resetTokenLoading, resetToken] = useFetch(resetSettingToken)
   const { copy } = useUtil()
 
   return (

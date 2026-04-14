@@ -1,6 +1,10 @@
 import { Resp } from "~/types"
 import { bus, notify } from "."
 
+const redirectToLogin = () => {
+  bus.emit("to", `/@login?redirect=${encodeURIComponent(location.pathname)}`)
+}
+
 export const handleResp = <T>(
   resp: Resp<T>,
   success?: (data: T) => void,
@@ -12,16 +16,15 @@ export const handleResp = <T>(
   if (resp.code === 200) {
     notify_success && notify.success(resp.message)
     success?.(resp.data)
+    return true
   } else {
     notify_error && notify.error(resp.message)
     if (auth && resp.code === 401) {
-      bus.emit(
-        "to",
-        `/@login?redirect=${encodeURIComponent(location.pathname)}`,
-      )
-      return
+      redirectToLogin()
+      return false
     }
     fail?.(resp.message, resp.code)
+    return false
   }
 }
 

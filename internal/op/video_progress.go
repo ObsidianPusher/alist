@@ -2,7 +2,6 @@ package op
 
 import (
 	"math"
-	"strings"
 	"time"
 
 	"github.com/alist-org/alist/v3/internal/db"
@@ -21,7 +20,7 @@ type VideoProgressInfo struct {
 }
 
 func GetVideoProgress(storageID uint, path string, fileID string) (*model.VideoProgress, error) {
-	path = cleanProgressPath(path)
+	path = normalizeVideoPath(path)
 	if fileID != "" {
 		if vp, err := db.GetVideoProgressByStorageAndFileID(storageID, fileID); err != nil || vp != nil {
 			return vp, err
@@ -35,7 +34,7 @@ func GetVideoProgressMap(storageID uint, paths []string) (map[string]VideoProgre
 		return map[string]VideoProgressInfo{}, nil
 	}
 	for i, p := range paths {
-		paths[i] = cleanProgressPath(p)
+		paths[i] = normalizeVideoPath(p)
 	}
 	rows, err := db.GetVideoProgressMapByPaths(storageID, paths)
 	if err != nil {
@@ -54,7 +53,7 @@ func GetVideoProgressMap(storageID uint, paths []string) (map[string]VideoProgre
 }
 
 func UpsertVideoProgress(storageID uint, path string, fileID string, size int64, modTime int64, position float64, duration float64) (*model.VideoProgress, error) {
-	path = cleanProgressPath(path)
+	path = normalizeVideoPath(path)
 	position = math.Max(0, position)
 	if duration < 0 {
 		duration = 0
@@ -101,7 +100,7 @@ func UpsertVideoProgress(storageID uint, path string, fileID string, size int64,
 }
 
 func MarkVideoWatched(storageID uint, path string, fileID string, size int64, modTime int64) (*model.VideoProgress, error) {
-	path = cleanProgressPath(path)
+	path = normalizeVideoPath(path)
 
 	var vp *model.VideoProgress
 	var err error
@@ -135,18 +134,4 @@ func MarkVideoWatched(storageID uint, path string, fileID string, size int64, mo
 		return nil, err
 	}
 	return vp, nil
-}
-
-func cleanProgressPath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "/"
-	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	if len(path) > 1 && strings.HasSuffix(path, "/") {
-		path = strings.TrimSuffix(path, "/")
-	}
-	return path
 }

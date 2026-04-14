@@ -24,16 +24,22 @@ import {
   UserMethods,
   UserPermissions,
   UserVisiblePermissionIndexes,
-  PResp,
+  WebauthnCredential,
+  WebauthnRegistrationSession,
 } from "~/types"
 import { handleResp, handleRespWithoutNotify, notify, r } from "~/utils"
 import { WebauthnItem } from "./Webauthnitems"
+import {
+  beginWebauthnRegistration,
+  finishWebauthnRegistration,
+  listWebauthnCredentials,
+} from "~/api/account"
+import { updateMyProfile } from "~/api/admin/users"
 import {
   RegistrationPublicKeyCredential,
   create,
   parseCreationOptionsFromJSON,
   supported,
-  CredentialCreationOptionsJSON,
 } from "@github/webauthn-json/browser-ponyfill"
 
 const PermissionBadge = (props: { can: boolean; children: JSXElement }) => {
@@ -54,43 +60,25 @@ const Profile = () => {
   const usecompatibility = getSettingBool("sso_compatibility_mode")
   const [loading, save] = useFetch(
     (ssoID?: boolean): PEmptyResp =>
-      r.post("/me/update", {
+      updateMyProfile({
         username: ssoID ? me().username : username(),
         password: ssoID ? "" : password(),
         sso_id: me().sso_id,
       }),
   )
 
-  interface WebauthnItem {
-    fingerprint: string
-    id: string
-  }
-
-  interface Webauthntemp {
-    session: string
-    options: CredentialCreationOptionsJSON
-  }
-
   const [getauthncredentialsloading, getauthncredentials] = useFetch(
-    (): PResp<WebauthnItem[]> => r.get("/authn/getcredentials"),
+    listWebauthnCredentials,
   )
   const [, getauthntemp] = useFetch(
-    (): PResp<Webauthntemp> => r.get("/authn/webauthn_begin_registration"),
+    beginWebauthnRegistration,
   )
   const [postregistrationloading, postregistration] = useFetch(
     (
       session: string,
       credentials: RegistrationPublicKeyCredential,
     ): PEmptyResp =>
-      r.post(
-        "/authn/webauthn_finish_registration",
-        JSON.stringify(credentials),
-        {
-          headers: {
-            session: session,
-          },
-        },
-      ),
+      finishWebauthnRegistration(session, credentials),
   )
   const saveMe = async (ssoID?: boolean) => {
     if (password() && password() !== confirmPassword()) {
@@ -124,7 +112,7 @@ const Profile = () => {
   onCleanup(() => {
     window.removeEventListener("message", messageEvent)
   })
-  const [credentials, setcredentials] = createSignal<WebauthnItem[]>([])
+  const [credentials, setcredentials] = createSignal<WebauthnCredential[]>([])
   const initauthnEdit = async () => {
     const resp = await getauthncredentials()
     handleRespWithoutNotify(resp, setcredentials)

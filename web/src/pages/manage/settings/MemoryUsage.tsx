@@ -1,32 +1,9 @@
 import { Box, Button, HStack, SimpleGrid, Text, VStack } from "@hope-ui/solid"
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { useFetch, useT } from "~/hooks"
-import { PResp } from "~/types"
-import { handleResp, r } from "~/utils"
-
-type MemoryStats = {
-  now: number
-  limit_mb: number
-  limit_bytes: number
-  heap_alloc: number
-  heap_inuse: number
-  heap_idle: number
-  heap_released: number
-  heap_sys: number
-  stack_inuse: number
-  stack_sys: number
-  mspan_inuse: number
-  mspan_sys: number
-  mcache_inuse: number
-  mcache_sys: number
-  gc_sys: number
-  other_sys: number
-  sys: number
-  num_gc: number
-  last_gc: number
-  pause_total_ns: number
-  next_gc: number
-}
+import { MemoryStats } from "~/types"
+import { handleResp } from "~/utils"
+import { getMemoryStats } from "~/api/admin/system"
 
 const formatBytes = (bytes: number) => {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
@@ -69,9 +46,7 @@ const MemoryUsage = () => {
   const t = useT()
   const [stats, setStats] = createSignal<MemoryStats>()
   const [prevStats, setPrevStats] = createSignal<MemoryStats>()
-  const [loading, fetchStats] = useFetch(
-    (): PResp<MemoryStats> => r.get("/admin/system/memory"),
-  )
+  const [loading, fetchStats] = useFetch(getMemoryStats)
 
   const refresh = async () => {
     const resp = await fetchStats()
@@ -219,19 +194,16 @@ const MemoryUsage = () => {
               <text
                 x="110"
                 y="105"
-                textAnchor="middle"
-                fontSize="16"
-                fontWeight="600"
-                fill="#0f172a"
+                text-anchor="middle"
+                style={{ "font-size": "16px", "font-weight": 600, fill: "#0f172a" }}
               >
                 {formatBytes(usedBytes())}
               </text>
               <text
                 x="110"
                 y="126"
-                textAnchor="middle"
-                fontSize="12"
-                fill="#64748b"
+                text-anchor="middle"
+                style={{ "font-size": "12px", fill: "#64748b" }}
               >
                 {totalBytes() > 0 ? `/${formatBytes(totalBytes())}` : ""}
               </text>

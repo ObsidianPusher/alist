@@ -1,21 +1,15 @@
 import { Button, Heading, Image, Input, Text, VStack } from "@hope-ui/solid"
-import { createSignal, Show } from "solid-js"
+import { createSignal, onMount, Show } from "solid-js"
 import { MaybeLoading } from "~/components"
 import { useRouter, useFetch, useT } from "~/hooks"
 import { setMe, me, getMainColor } from "~/store"
-import { PEmptyResp, PResp } from "~/types"
-import { handleResp, handleRespWithNotifySuccess, notify, r } from "~/utils"
-
-interface Generate2FA {
-  qr: string
-  secret: string
-}
+import { Generate2FA, PEmptyResp } from "~/types"
+import { handleResp, handleRespWithNotifySuccess, notify } from "~/utils"
+import { generate2FA, verify2FA as verify2FAApi } from "~/api/account"
 
 const TwoFA = () => {
   const { back } = useRouter()
-  const [generateLoading, generate] = useFetch(
-    (): PResp<Generate2FA> => r.post("/auth/2fa/generate"),
-  )
+  const [generateLoading, generate] = useFetch(generate2FA)
   const t = useT()
   const [otpData, setOtpData] = createSignal<Generate2FA>()
   const init = async () => {
@@ -28,10 +22,12 @@ const TwoFA = () => {
     handleResp(resp, setOtpData)
   }
   const [code, setCode] = createSignal("")
-  init()
+  onMount(() => {
+    void init()
+  })
   const [verifyLoadind, verify] = useFetch(
     (): PEmptyResp =>
-      r.post("/auth/2fa/verify", {
+      verify2FAApi({
         code: code(),
         secret: otpData()?.secret,
       }),

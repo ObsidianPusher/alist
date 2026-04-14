@@ -9,7 +9,7 @@ import {
   FormLabel,
   Flex,
 } from "@hope-ui/solid"
-import { r, handleRespWithoutNotify, notify } from "~/utils"
+import { handleRespWithoutNotify, notify } from "~/utils"
 import { useFetch, useManageTitle, useT } from "~/hooks"
 import {
   Meta,
@@ -23,6 +23,10 @@ import {
 } from "~/types"
 import { createSignal, For } from "solid-js"
 import crypto from "crypto-js"
+import { listAllSettings, saveSettings as saveSettingsApi } from "~/api/admin/settings"
+import { createMeta, listMetas, updateMeta } from "~/api/admin/metas"
+import { createStorage, listStorages, updateStorage } from "~/api/admin/storages"
+import { createUser, listUsers, updateUser } from "~/api/admin/users"
 
 interface Data {
   encrypted: string
@@ -72,17 +76,11 @@ const BackupRestore = () => {
     logRef.scrollTop = logRef.scrollHeight
   }
   const [getSettingsLoading, getSettings] = useFetch(
-    (): PResp<any> => r.get("/admin/setting/list"),
+    listAllSettings,
   )
-  const [getUsersLoading, getUsers] = useFetch(
-    (): PPageResp<User> => r.get("/admin/user/list"),
-  )
-  const [getMetasLoading, getMetas] = useFetch(
-    (): PPageResp<Meta> => r.get("/admin/meta/list"),
-  )
-  const [getStoragesLoading, getStorages] = useFetch(
-    (): PPageResp<Storage> => r.get("/admin/storage/list"),
-  )
+  const [getUsersLoading, getUsers] = useFetch((): PPageResp<User> => listUsers())
+  const [getMetasLoading, getMetas] = useFetch((): PPageResp<Meta> => listMetas())
+  const [getStoragesLoading, getStorages] = useFetch((): PPageResp<Storage> => listStorages())
   const backupLoading = () => {
     return (
       getSettingsLoading() ||
@@ -171,30 +169,14 @@ const BackupRestore = () => {
     appendLog(t("br.finish_backup"), "info")
   }
   const [addSettingsLoading, addSettings] = useFetch(
-    (data: SettingItem[]): PEmptyResp => r.post("/admin/setting/save", data),
+    (data: SettingItem[]): PEmptyResp => saveSettingsApi(data),
   )
-  const [addUserLoading, addUser] = useFetch((user: User): PEmptyResp => {
-    return r.post(`/admin/user/create`, user)
-  })
-  const [addStorageLoading, addStorage] = useFetch(
-    (storage: Storage): PEmptyResp => {
-      return r.post(`/admin/storage/create`, storage)
-    },
-  )
-  const [addMetaLoading, addMeta] = useFetch((meta: Meta): PEmptyResp => {
-    return r.post(`/admin/meta/create`, meta)
-  })
-  const [updateUserLoading, updateUser] = useFetch((user: User): PEmptyResp => {
-    return r.post(`/admin/user/update`, user)
-  })
-  const [updateStorageLoading, updateStorage] = useFetch(
-    (storage: Storage): PEmptyResp => {
-      return r.post(`/admin/storage/update`, storage)
-    },
-  )
-  const [updateMetaLoading, updateMeta] = useFetch((meta: Meta): PEmptyResp => {
-    return r.post(`/admin/meta/update`, meta)
-  })
+  const [addUserLoading, addUser] = useFetch((user: User): PEmptyResp => createUser(user))
+  const [addStorageLoading, addStorage] = useFetch((storage: Storage): PEmptyResp => createStorage(storage))
+  const [addMetaLoading, addMeta] = useFetch((meta: Meta): PEmptyResp => createMeta(meta))
+  const [updateUserLoading, updateUserReq] = useFetch((user: User): PEmptyResp => updateUser(user))
+  const [updateStorageLoading, updateStorageReq] = useFetch((storage: Storage): PEmptyResp => updateStorage(storage))
+  const [updateMetaLoading, updateMetaReq] = useFetch((meta: Meta): PEmptyResp => updateMeta(meta))
   async function handleOvrData<T>(
     dataArray: T[],
     getDataFunc: { (): PResp<{ content: T[]; total: number }> },
@@ -321,7 +303,7 @@ const BackupRestore = () => {
             data.users,
             getUsers,
             addUser,
-            updateUser,
+            updateUserReq,
             "username",
             "manage.sidemenu.users",
           )
@@ -329,7 +311,7 @@ const BackupRestore = () => {
             data.storages,
             getStorages,
             addStorage,
-            updateStorage,
+            updateStorageReq,
             "mount_path",
             "manage.sidemenu.storages",
           )
@@ -337,7 +319,7 @@ const BackupRestore = () => {
             data.metas,
             getMetas,
             addMeta,
-            updateMeta,
+            updateMetaReq,
             "path",
             "manage.sidemenu.metas",
           )

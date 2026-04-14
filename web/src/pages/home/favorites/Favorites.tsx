@@ -18,7 +18,7 @@ import {
   batchRemoveVideoFavorites,
   listVideoFavorites,
   toggleVideoFavorite,
-} from "~/utils/api"
+} from "~/api/media"
 import {
   formatDate,
   getFileSize,
@@ -137,7 +137,7 @@ const Favorites = () => {
             value={storageFilter()}
             onChange={(value) => {
               setStorageFilter(value)
-              setSelected(new Set())
+              setSelected(new Set<number>())
               void reload()
             }}
             options={[
@@ -185,7 +185,7 @@ const Favorites = () => {
               const ids = Array.from(selected())
               const resp = await batchRemoveReq(ids)
               handleRespWithNotifySuccess(resp, () => {
-                setSelected(new Set())
+                setSelected(new Set<number>())
                 void reload()
               })
             }}
@@ -224,18 +224,22 @@ const Favorites = () => {
                     <Checkbox
                       checked={selected().has(item.id)}
                       disabled={disabledByStorage}
-                      onChange={(e) => toggleSelected(item.id, e.currentTarget.checked)}
+                      onChange={(e: Event & { currentTarget: HTMLInputElement }) =>
+                        toggleSelected(item.id, e.currentTarget.checked)
+                      }
                     />
                     <VStack alignItems="flex-start" spacing="1" minW={0} flex={1}>
                       <HStack spacing="$2" wrap="wrap">
                         <Text
                           fontWeight="$semibold"
                           maxW="60vw"
-                          overflow="hidden"
-                          textOverflow="ellipsis"
-                          whiteSpace="nowrap"
                           onClick={() => to(item.path)}
                           cursor="pointer"
+                          style={{
+                            overflow: "hidden",
+                            "text-overflow": "ellipsis",
+                            "white-space": "nowrap",
+                          }}
                         >
                           {item.name}
                         </Text>

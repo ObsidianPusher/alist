@@ -125,7 +125,7 @@ export const VideoBox = (props: {
             }}
             defaultChecked={autoNext === "true"}
             aria-label="Toggle auto play next video"
-            onChange={(e) => {
+            onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
               props.onAutoNextChange(e.currentTarget.checked)
               localStorage.setItem(
                 "video_auto_next",

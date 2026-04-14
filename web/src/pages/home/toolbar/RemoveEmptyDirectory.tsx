@@ -8,19 +8,16 @@ import {
   ModalOverlay,
   createDisclosure,
 } from "@hope-ui/solid"
-import { useFetch, usePath, useRouter, useT } from "~/hooks"
-import {
-  bus,
-  fsRemoveEmptyDirectory,
-  handleRespWithNotifySuccess,
-} from "~/utils"
+import { useFetch, useFsAction, useRouter, useT } from "~/hooks"
+import { bus } from "~/utils"
 import { onCleanup } from "solid-js"
+import { removeEmptyDirectoryFs } from "~/api/fs-ops"
 
 export const RemoveEmptyDirectory = () => {
   const { isOpen, onOpen, onClose } = createDisclosure()
   const { pathname } = useRouter()
-  const [loading, ok] = useFetch(fsRemoveEmptyDirectory)
-  const { refresh } = usePath()
+  const [loading, ok] = useFetch(removeEmptyDirectoryFs)
+  const { submit } = useFsAction()
   const handler = (name: string) => {
     if (name === "removeEmptyDirectory") {
       onOpen()
@@ -56,8 +53,7 @@ export const RemoveEmptyDirectory = () => {
             loading={loading()}
             onClick={async () => {
               const resp = await ok(pathname())
-              handleRespWithNotifySuccess(resp, () => {
-                refresh()
+              submit(resp, () => {
                 onClose()
               })
             }}

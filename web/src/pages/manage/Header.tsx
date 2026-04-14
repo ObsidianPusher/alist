@@ -18,13 +18,14 @@ import { TiThMenu } from "solid-icons/ti"
 import { IoExit } from "solid-icons/io"
 import { SwitchColorMode, SwitchLanguageWhite } from "~/components"
 import { useFetch, useRouter, useT } from "~/hooks"
+import { logout } from "~/api/auth"
 import { SideMenu } from "./SideMenu"
 import { side_menu_items } from "./sidemenu_items"
-import { changeToken, handleResp, notify, r } from "~/utils"
+import { changeToken, handleResp, notify } from "~/utils"
 import { PResp } from "~/types"
 const { isOpen, onOpen, onClose } = createDisclosure()
 const [logOutReqLoading, logOutReq] = useFetch(
-  (): PResp<any> => r.get("/auth/logout"),
+  (): PResp<any> => logout(),
 )
 
 const Header = () => {

@@ -9,15 +9,16 @@ import {
   createDisclosure,
 } from "@hope-ui/solid"
 import { onCleanup } from "solid-js"
-import { useFetch, usePath, useRouter, useT } from "~/hooks"
+import { useFetch, useFsAction, useRouter, useT } from "~/hooks"
 import { selectedObjs } from "~/store"
-import { bus, fsRemove, handleRespWithNotifySuccess } from "~/utils"
+import { bus } from "~/utils"
+import { removeFs } from "~/api/fs-ops"
 
 export const Delete = () => {
   const t = useT()
   const { isOpen, onOpen, onClose } = createDisclosure()
-  const [loading, ok] = useFetch(fsRemove)
-  const { refresh } = usePath()
+  const [loading, ok] = useFetch(removeFs)
+  const { submit } = useFsAction()
   const { pathname } = useRouter()
   const handler = (name: string) => {
     if (name === "delete") {
@@ -56,8 +57,7 @@ export const Delete = () => {
                 pathname(),
                 selectedObjs().map((obj) => obj.name),
               )
-              handleRespWithNotifySuccess(resp, () => {
-                refresh()
+              submit(resp, () => {
                 onClose()
               })
             }}

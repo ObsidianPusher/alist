@@ -1,9 +1,11 @@
+import type { CredentialCreationOptionsJSON } from "@github/webauthn-json/browser-ponyfill"
 import { Obj } from "."
 
 export interface Resp<T> {
   code: number
   message: string
   data: T
+  request_id?: string
 }
 
 export type PageResp<T> = Resp<{
@@ -141,7 +143,77 @@ export type LocalBrowserDirSizes = {
   items: LocalBrowserDirSizeItem[]
 }
 
-export type LocalBrowserStoragesResp = Resp<LocalBrowserStorage[]>
-export type LocalBrowserListResp = Resp<LocalBrowserList>
-export type LocalBrowserUsageResp = Resp<LocalBrowserUsage>
-export type LocalBrowserDirSizesResp = Resp<LocalBrowserDirSizes>
+export type WebauthnCredential = {
+  fingerprint: string
+  id: string
+}
+
+export type WebauthnRegistrationSession = {
+  session: string
+  options: CredentialCreationOptionsJSON
+}
+
+export type Generate2FA = {
+  qr: string
+  secret: string
+}
+
+export type MemoryStats = {
+  now: number
+  limit_mb: number
+  limit_bytes: number
+  heap_alloc: number
+  heap_inuse: number
+  heap_idle: number
+  heap_released: number
+  heap_sys: number
+  stack_inuse: number
+  stack_sys: number
+  mspan_inuse: number
+  mspan_sys: number
+  mcache_inuse: number
+  mcache_sys: number
+  gc_sys: number
+  other_sys: number
+  sys: number
+  num_gc: number
+  last_gc: number
+  pause_total_ns: number
+  next_gc: number
+}
+
+export type BaiduTransferAggregate = {
+  active_blocks: number
+  total_bytes: number
+  total_blocks: number
+  total_duration_ms: number
+  average_block_ms: number
+  average_throughput_bps: number
+  throughput_1m_bps: number
+  throughput_5m_bps: number
+  max_block_ms: number
+  last_finished_at: number
+}
+
+export type BaiduRecentBlock = {
+  direction: "download" | "upload"
+  backend_id: string
+  file: string
+  offset: number
+  size: number
+  duration_ms: number
+  throughput_bps: number
+  finished_at: number
+}
+
+export type BaiduMetricsSnapshot = {
+  generated_at: number
+  download: BaiduTransferAggregate
+  upload: BaiduTransferAggregate
+  recent: BaiduRecentBlock[]
+}
+
+export type LocalBrowserStoragesResp = PResp<LocalBrowserStorage[]>
+export type LocalBrowserListResp = PResp<LocalBrowserList>
+export type LocalBrowserUsageResp = PResp<LocalBrowserUsage>
+export type LocalBrowserDirSizesResp = PResp<LocalBrowserDirSizes>

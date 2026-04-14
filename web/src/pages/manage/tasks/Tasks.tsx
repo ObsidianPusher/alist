@@ -2,8 +2,9 @@ import { Button, Heading, HStack, VStack } from "@hope-ui/solid"
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { Paginator } from "~/components"
 import { useFetch, useT } from "~/hooks"
-import { PEmptyResp, PResp, TaskInfo } from "~/types"
-import { handleResp, r } from "~/utils"
+import { TaskInfo } from "~/types"
+import { clearDoneTasks, clearSucceededTasks, listTasks, retryFailedTasks } from "~/api/admin/tasks"
+import { handleResp } from "~/utils"
 import { Task } from "./Task"
 
 enum TaskStateEnum {
@@ -50,7 +51,7 @@ export interface TasksProps {
 export const Tasks = (props: TasksProps) => {
   const t = useT()
   const [loading, get] = useFetch(
-    (): PResp<TaskInfo[]> => r.get(`/task/${props.type}/${props.done}`),
+    () => listTasks(props.type, props.done),
   )
   const [tasks, setTasks] = createSignal<TaskInfo[]>([])
   const [speedMap, setSpeedMap] = createSignal<Map<string, string>>(new Map())
@@ -120,13 +121,13 @@ export const Tasks = (props: TasksProps) => {
     onCleanup(() => clearInterval(interval))
   }
   const [clearDoneLoading, clearDone] = useFetch(
-    (): PEmptyResp => r.post(`/task/${props.type}/clear_done`),
+    () => clearDoneTasks(props.type),
   )
   const [clearSucceededLoading, clearSucceeded] = useFetch(
-    (): PEmptyResp => r.post(`/task/${props.type}/clear_succeeded`),
+    () => clearSucceededTasks(props.type),
   )
   const [retryFailedLoading, retryFailed] = useFetch(
-    (): PEmptyResp => r.post(`/task/${props.type}/retry_failed`),
+    () => retryFailedTasks(props.type),
   )
   const [page, setPage] = createSignal(1)
   const pageSize = 20

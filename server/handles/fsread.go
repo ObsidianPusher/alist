@@ -9,7 +9,6 @@ import (
 
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/driver"
-	"github.com/alist-org/alist/v3/internal/errs"
 	"github.com/alist-org/alist/v3/internal/fs"
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
@@ -19,7 +18,6 @@ import (
 	"github.com/alist-org/alist/v3/pkg/utils"
 	"github.com/alist-org/alist/v3/server/common"
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
 )
 
 type ListReq struct {
@@ -62,27 +60,17 @@ type FsListResp struct {
 
 func FsList(c *gin.Context) {
 	var req ListReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
 	req.Validate()
-	user := c.MustGet("user").(*model.User)
-	reqPath, err := user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	user := currentUser(c)
+	reqPath, ok := joinUserPathOrAbort(c, user, req.Path)
+	if !ok {
 		return
 	}
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil {
-		if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-			common.ErrorResp(c, err, 500, true)
-			return
-		}
-	}
-	c.Set("meta", meta)
-	if !common.CanAccess(user, meta, reqPath, req.Password) {
-		common.ErrorStrResp(c, "password is incorrect or you have no permission", 403)
+	meta, ok := ensureCanAccessPath(c, user, reqPath, req.Password)
+	if !ok {
 		return
 	}
 	if !user.CanWrite() && !common.CanWrite(meta, reqPath) && req.Refresh {
@@ -112,11 +100,10 @@ func FsList(c *gin.Context) {
 
 func FsDirs(c *gin.Context) {
 	var req DirReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
+	user := currentUser(c)
 	reqPath := req.Path
 	if req.ForceRoot {
 		if !user.IsAdmin() {
@@ -124,23 +111,14 @@ func FsDirs(c *gin.Context) {
 			return
 		}
 	} else {
-		tmp, err := user.JoinPath(req.Path)
-		if err != nil {
-			common.ErrorResp(c, err, 403)
+		tmp, ok := joinUserPathOrAbort(c, user, req.Path)
+		if !ok {
 			return
 		}
 		reqPath = tmp
 	}
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil {
-		if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-			common.ErrorResp(c, err, 500, true)
-			return
-		}
-	}
-	c.Set("meta", meta)
-	if !common.CanAccess(user, meta, reqPath, req.Password) {
-		common.ErrorStrResp(c, "password is incorrect or you have no permission", 403)
+	_, ok := ensureCanAccessPath(c, user, reqPath, req.Password)
+	if !ok {
 		return
 	}
 	objs, err := fs.List(c, reqPath, &fs.ListArgs{})
@@ -324,26 +302,16 @@ type FsGetResp struct {
 
 func FsGet(c *gin.Context) {
 	var req FsGetReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	reqPath, err := user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	user := currentUser(c)
+	reqPath, ok := joinUserPathOrAbort(c, user, req.Path)
+	if !ok {
 		return
 	}
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil {
-		if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-			common.ErrorResp(c, err, 500)
-			return
-		}
-	}
-	c.Set("meta", meta)
-	if !common.CanAccess(user, meta, reqPath, req.Password) {
-		common.ErrorStrResp(c, "password is incorrect or you have no permission", 403)
+	meta, ok := ensureCanAccessPath(c, user, reqPath, req.Password)
+	if !ok {
 		return
 	}
 	obj, err := fs.Get(c, reqPath, &fs.GetArgs{})
@@ -488,27 +456,16 @@ type FsOtherReq struct {
 
 func FsOther(c *gin.Context) {
 	var req FsOtherReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	var err error
-	req.Path, err = user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	user := currentUser(c)
+	reqPath, ok := joinUserPathOrAbort(c, user, req.Path)
+	if !ok {
 		return
 	}
-	meta, err := op.GetNearestMeta(req.Path)
-	if err != nil {
-		if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-			common.ErrorResp(c, err, 500)
-			return
-		}
-	}
-	c.Set("meta", meta)
-	if !common.CanAccess(user, meta, req.Path, req.Password) {
-		common.ErrorStrResp(c, "password is incorrect or you have no permission", 403)
+	req.Path = reqPath
+	if _, ok := ensureCanAccessPath(c, user, req.Path, req.Password); !ok {
 		return
 	}
 	res, err := fs.Other(c, req.FsOtherArgs)

@@ -73,7 +73,7 @@ export const VideoThumbnail = (props: {
       >
         <video
           muted
-          playsInline
+          playsinline
           preload={canLoad() ? "metadata" : "none"}
           src={canLoad() ? props.src : undefined}
           title={props.alt}

@@ -8,7 +8,6 @@ import (
 
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/driver"
-	"github.com/alist-org/alist/v3/internal/errs"
 	"github.com/alist-org/alist/v3/internal/fs"
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
@@ -18,7 +17,6 @@ import (
 	"github.com/alist-org/alist/v3/pkg/utils"
 	"github.com/alist-org/alist/v3/server/common"
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -28,28 +26,16 @@ type MkdirOrLinkReq struct {
 
 func FsMkdir(c *gin.Context) {
 	var req MkdirOrLinkReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	reqPath, err := user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	user := currentUser(c)
+	reqPath, ok := joinUserPathOrAbort(c, user, req.Path)
+	if !ok {
 		return
 	}
-	if !user.CanWrite() {
-		meta, err := op.GetNearestMeta(stdpath.Dir(reqPath))
-		if err != nil {
-			if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-				common.ErrorResp(c, err, 500, true)
-				return
-			}
-		}
-		if !common.CanWrite(meta, reqPath) {
-			common.ErrorResp(c, errs.PermissionDenied, 403)
-			return
-		}
+	if !ensureCanWritePath(c, user, reqPath) {
+		return
 	}
 	if err := fs.MakeDir(c, reqPath); err != nil {
 		common.ErrorResp(c, err, 500)
@@ -160,19 +146,16 @@ func FsMove(c *gin.Context) {
 		common.ErrorStrResp(c, "Empty file names", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	if !user.CanMove() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
+	user := currentUser(c)
+	if !requireUserCapability(c, user.CanMove()) {
 		return
 	}
-	srcDir, err := user.JoinPath(req.SrcDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	srcDir, _, ok := prepareScopedPath(c, user, req.SrcDir)
+	if !ok {
 		return
 	}
-	dstDir, err := user.JoinPath(req.DstDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	dstDir, _, ok := prepareScopedPath(c, user, req.DstDir)
+	if !ok {
 		return
 	}
 	groupID := ""
@@ -197,59 +180,28 @@ func FsMove(c *gin.Context) {
 			return
 		}
 	}
-	if groupID == "" && len(addedTasks) > 0 {
-		candidate := addedTasks[0].GetGroupID()
-		if candidate != "" {
-			same := true
-			for _, t := range addedTasks[1:] {
-				if t.GetGroupID() != candidate {
-					same = false
-					break
-				}
-			}
-			if same {
-				groupID = candidate
-			}
-		}
-	}
-	if len(addedTasks) == 0 {
-		common.SuccessResp(c)
-		return
-	}
-	if groupID != "" {
-		common.SuccessResp(c, gin.H{
-			"task": buildGroupTaskInfo[task.TaskInfoWithCreator](groupID, addedTasks, "file operation batch"),
-		})
-		return
-	}
-	common.SuccessResp(c, gin.H{
-		"tasks": getTaskInfos(addedTasks),
-	})
+	successTaskResp(c, groupID, addedTasks, "file operation batch")
 }
 
 func FsCopy(c *gin.Context) {
 	var req MoveCopyReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
 	if len(req.Names) == 0 {
 		common.ErrorStrResp(c, "Empty file names", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	if !user.CanCopy() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
+	user := currentUser(c)
+	if !requireUserCapability(c, user.CanCopy()) {
 		return
 	}
-	srcDir, err := user.JoinPath(req.SrcDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	srcDir, _, ok := prepareScopedPath(c, user, req.SrcDir)
+	if !ok {
 		return
 	}
-	dstDir, err := user.JoinPath(req.DstDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	dstDir, _, ok := prepareScopedPath(c, user, req.DstDir)
+	if !ok {
 		return
 	}
 	dstStorage, dstDirActualPath, err := op.GetStorageAndActualPath(dstDir)
@@ -328,34 +280,7 @@ func FsCopy(c *gin.Context) {
 			return
 		}
 	}
-	if groupID == "" && len(addedTasks) > 0 {
-		candidate := addedTasks[0].GetGroupID()
-		if candidate != "" {
-			same := true
-			for _, t := range addedTasks[1:] {
-				if t.GetGroupID() != candidate {
-					same = false
-					break
-				}
-			}
-			if same {
-				groupID = candidate
-			}
-		}
-	}
-	if len(addedTasks) == 0 {
-		common.SuccessResp(c)
-		return
-	}
-	if groupID != "" {
-		common.SuccessResp(c, gin.H{
-			"task": buildGroupTaskInfo[task.TaskInfoWithCreator](groupID, addedTasks, "file operation batch"),
-		})
-		return
-	}
-	common.SuccessResp(c, gin.H{
-		"tasks": getTaskInfos(addedTasks),
-	})
+	successTaskResp(c, groupID, addedTasks, "file operation batch")
 }
 
 type RenameReq struct {
@@ -365,18 +290,15 @@ type RenameReq struct {
 
 func FsRename(c *gin.Context) {
 	var req RenameReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	if !user.CanRename() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
+	user := currentUser(c)
+	if !requireUserCapability(c, user.CanRename()) {
 		return
 	}
-	reqPath, err := user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	reqPath, _, ok := prepareScopedPath(c, user, req.Path)
+	if !ok {
 		return
 	}
 	if err := fs.Rename(c, reqPath, req.Name); err != nil {
@@ -393,22 +315,19 @@ type RemoveReq struct {
 
 func FsRemove(c *gin.Context) {
 	var req RemoveReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
 	if len(req.Names) == 0 {
 		common.ErrorStrResp(c, "Empty file names", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	if !user.CanRemove() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
+	user := currentUser(c)
+	if !requireUserCapability(c, user.CanRemove()) {
 		return
 	}
-	reqDir, err := user.JoinPath(req.Dir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	reqDir, _, ok := prepareScopedPath(c, user, req.Dir)
+	if !ok {
 		return
 	}
 	for _, name := range req.Names {
@@ -430,31 +349,18 @@ type RemoveEmptyDirectoryReq struct {
 
 func FsRemoveEmptyDirectory(c *gin.Context) {
 	var req RemoveEmptyDirectoryReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
 
-	user := c.MustGet("user").(*model.User)
-	if !user.CanRemove() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
+	user := currentUser(c)
+	if !requireUserCapability(c, user.CanRemove()) {
 		return
 	}
-	srcDir, err := user.JoinPath(req.SrcDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	srcDir, _, ok := prepareScopedPath(c, user, req.SrcDir)
+	if !ok {
 		return
 	}
-
-	meta, err := op.GetNearestMeta(srcDir)
-	if err != nil {
-		if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-			common.ErrorResp(c, err, 500, true)
-			return
-		}
-	}
-	c.Set("meta", meta)
-
 	rootFiles, err := fs.List(c, srcDir, &fs.ListArgs{})
 	if err != nil {
 		common.ErrorResp(c, err, 500)

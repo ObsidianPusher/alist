@@ -1,7 +1,7 @@
 import "~/utils/zip-stream.js"
 import streamSaver from "streamsaver"
 import { getLinkByDirAndObj, useRouter, useT } from "~/hooks"
-import { fsList, pathBase, pathJoin } from "~/utils"
+import { pathBase, pathJoin } from "~/utils"
 import { password, selectedObjs as _selectedObjs } from "~/store"
 import { createSignal, For, Show } from "solid-js"
 import {
@@ -13,6 +13,7 @@ import {
   VStack,
 } from "@hope-ui/solid"
 import { Obj } from "~/types"
+import { listFsObjects } from "~/api/fs"
 
 streamSaver.mitm = "/streamer/mitm.html"
 const trimSlash = (str: string) => {
@@ -57,7 +58,10 @@ const PackageDownload = (props: { onClose: () => void }) => {
         },
       ]
     } else {
-      const resp = await fsList(pathJoin(pathname(), pre, obj.name), password())
+      const resp = await listFsObjects({
+        path: pathJoin(pathname(), pre, obj.name),
+        password: password(),
+      })
       if (resp.code !== 200) {
         return resp.message
       }

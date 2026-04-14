@@ -6,7 +6,8 @@ import { onCleanup, onMount } from "solid-js"
 import { useLink, useRouter } from "~/hooks"
 import { getSetting, getSettingBool, objStore } from "~/store"
 import { ObjType, StoreObj } from "~/types"
-import { baseName, fsGet } from "~/utils"
+import { baseName } from "~/utils"
+import { getFsObject } from "~/api/fs"
 
 const Preview = () => {
   const { proxyLink, rawLink, previewPage } = useLink()
@@ -62,7 +63,7 @@ const Preview = () => {
         const i = ap.list.index
         if (!ap.list.audios[i].lrc) return
         const lrcURL = ap.list.audios[i].lrc
-        fsGet(lrcURL).then((resp) => {
+        getFsObject(lrcURL).then((resp) => {
           ap.lrc.async = true
           ap.lrc.parsed[i] = undefined
           ap.list.audios[i].lrc = resp.data.raw_url

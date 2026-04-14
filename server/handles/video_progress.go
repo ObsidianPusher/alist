@@ -1,15 +1,11 @@
 package handles
 
 import (
-	"net/http"
 	"time"
 
-	"github.com/alist-org/alist/v3/internal/errs"
-	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
 	"github.com/alist-org/alist/v3/server/common"
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
 )
 
 type VideoProgressGetReq struct {
@@ -40,27 +36,11 @@ func GetVideoProgress(c *gin.Context) {
 		common.ErrorStrResp(c, "path required", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	reqPath, err := user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	access, ok := resolveVideoAccess(c, req.Path)
+	if !ok {
 		return
 	}
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil && !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-		common.ErrorResp(c, err, 500)
-		return
-	}
-	if !common.CanAccess(user, meta, reqPath, "") {
-		common.ErrorStrResp(c, "permission denied", http.StatusForbidden)
-		return
-	}
-	storage, _, err := op.GetStorageAndActualPath(reqPath)
-	if err != nil {
-		common.ErrorResp(c, err, 404)
-		return
-	}
-	vp, err := op.GetVideoProgress(storage.GetStorage().ID, reqPath, "")
+	vp, err := op.GetVideoProgress(access.storage.ID, access.reqPath, "")
 	if err != nil || vp == nil {
 		common.SuccessResp(c, nil)
 		return
@@ -81,27 +61,11 @@ func SaveVideoProgress(c *gin.Context) {
 		common.ErrorStrResp(c, "invalid payload", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	reqPath, err := user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	access, ok := resolveVideoAccess(c, req.Path)
+	if !ok {
 		return
 	}
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil && !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-		common.ErrorResp(c, err, 500)
-		return
-	}
-	if !common.CanAccess(user, meta, reqPath, "") {
-		common.ErrorStrResp(c, "permission denied", http.StatusForbidden)
-		return
-	}
-	storage, _, err := op.GetStorageAndActualPath(reqPath)
-	if err != nil {
-		common.ErrorResp(c, err, 404)
-		return
-	}
-	vp, err := op.UpsertVideoProgress(storage.GetStorage().ID, reqPath, req.FileID, req.Size, req.ModTime, req.Position, req.Duration)
+	vp, err := op.UpsertVideoProgress(access.storage.ID, access.reqPath, req.FileID, req.Size, req.ModTime, req.Position, req.Duration)
 	if err != nil {
 		common.ErrorResp(c, err, 500)
 		return

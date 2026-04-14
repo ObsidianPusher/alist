@@ -35,10 +35,10 @@ import {
 import { useFetch, usePath, useRouter, useT } from "~/hooks"
 import { getMainColor, me, password } from "~/store"
 import { SearchNode } from "~/types"
+import { searchFsObjects } from "~/api/fs"
 import {
   bus,
   encodePath,
-  fsSearch,
   getFileSize,
   handleResp,
   hoverColor,
@@ -201,7 +201,7 @@ const Search = () => {
   })
   const [keywords, setKeywords] = createSignal("")
   const { pathname } = useRouter()
-  const [loading, searchReq] = useFetch(fsSearch)
+  const [loading, searchReq] = useFetch(searchFsObjects)
   const [data, setData] = createSignal({
     content: [] as SearchNode[],
     total: 0,

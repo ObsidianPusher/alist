@@ -13,8 +13,9 @@ import {
 } from "@hope-ui/solid"
 import { MaybeLoading, FolderChooseInput } from "~/components"
 import { useFetch, useRouter, useT } from "~/hooks"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
 import { Meta, PEmptyResp, PResp } from "~/types"
+import { getMeta, saveMeta } from "~/api/admin/metas"
 import { createStore } from "solid-js/store"
 import { For, Show } from "solid-js"
 
@@ -100,7 +101,7 @@ const AddOrEdit = () => {
     header_sub: false,
   })
   const [metaLoading, loadMeta] = useFetch(
-    (): PResp<Meta> => r.get(`/admin/meta/get?id=${id}`),
+    (): PResp<Meta> => getMeta(id!),
   )
 
   const initEdit = async () => {
@@ -111,7 +112,7 @@ const AddOrEdit = () => {
     initEdit()
   }
   const [okLoading, ok] = useFetch((): PEmptyResp => {
-    return r.post(`/admin/meta/${id ? "update" : "create"}`, meta)
+    return saveMeta(id, meta)
   })
   return (
     <MaybeLoading loading={metaLoading()}>

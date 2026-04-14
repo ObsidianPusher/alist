@@ -11,7 +11,7 @@ import {
 import { createMemo, createSignal, For, Show } from "solid-js"
 import { MaybeLoading } from "~/components"
 import { useFetch, useRouter, useT, useUtil } from "~/hooks"
-import { handleResp, joinBase, notify, r } from "~/utils"
+import { handleResp, joinBase, notify } from "~/utils"
 import {
   Addition,
   DriverConfig,
@@ -20,15 +20,10 @@ import {
   Storage,
   Type,
 } from "~/types"
+import { getDriverInfo, getStorage, listDrivers, saveStorage, type DriverInfo, type Drivers } from "~/api/admin/storages"
 import { createStore, produce } from "solid-js/store"
 import { Item } from "./Item"
 import { ResponsiveGrid } from "../common/ResponsiveGrid"
-
-interface DriverInfo {
-  common: DriverItem[]
-  additional: DriverItem[]
-  config: DriverConfig
-}
 
 function GetDefaultValue(type: Type, value?: string) {
   switch (type) {
@@ -49,15 +44,12 @@ function GetDefaultValue(type: Type, value?: string) {
       return ""
   }
 }
-
-type Drivers = Record<string, DriverInfo>
-
 const AddOrEdit = () => {
   const t = useT()
   const { params, back, to } = useRouter()
   const { id } = params
   const [driversLoading, loadDrivers] = useFetch(
-    (): PResp<Drivers> => r.get("/admin/driver/list"),
+    (): PResp<Drivers> => listDrivers(),
     true,
   )
   const [drivers, setDrivers] = createSignal<Drivers>({})
@@ -67,12 +59,11 @@ const AddOrEdit = () => {
   }
 
   const [storageLoading, loadStorage] = useFetch(
-    (): PResp<Storage> => r.get(`/admin/storage/get?id=${id}`),
+    (): PResp<Storage> => getStorage(id!),
     true,
   )
   const [driverLoading, loadDriver] = useFetch(
-    (): PResp<DriverInfo> =>
-      r.get(`/admin/driver/info?driver=${storage.driver}`),
+    (): PResp<DriverInfo> => getDriverInfo(storage.driver),
     true,
   )
   const initEdit = async () => {
@@ -96,7 +87,7 @@ const AddOrEdit = () => {
   const { copy } = useUtil()
   const [okLoading, ok] = useFetch((): PResp<{ id: number }> => {
     setStorage("addition", JSON.stringify(addition))
-    return r.post(`/admin/storage/${id ? "update" : "create"}`, storage)
+    return saveStorage(id, storage)
   })
   const alert = createMemo(() => {
     const i = drivers()[storage.driver]?.config.alert
@@ -204,7 +195,7 @@ const AddOrEdit = () => {
                     notify.success(t("global.copied"))
                   }
                 }}
-                isDisabled={!baiduAuthorizeUrl()}
+                disabled={!baiduAuthorizeUrl()}
               >
                 {t("global.copy")}
               </Button>

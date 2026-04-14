@@ -12,7 +12,7 @@ import { layout } from "~/store"
 import { ContextMenu } from "./context-menu"
 import { Pager } from "./Pager"
 import { useLink, useT } from "~/hooks"
-import { objStore } from "~/store"
+import { useCurrentObjs, useCurrentProvider } from "~/store"
 import { ObjType } from "~/types"
 import { bus } from "~/utils"
 import lightGallery from "lightgallery"
@@ -32,10 +32,12 @@ const ImageLayout = lazy(() => import("./Images"))
 
 const Folder = () => {
   const { rawLink } = useLink()
+  const objs = useCurrentObjs()
+  const provider = useCurrentProvider()
   const images = createMemo(() =>
-    objStore.objs.filter((obj) => obj.type === ObjType.IMAGE),
+    objs().filter((obj) => obj.type === ObjType.IMAGE),
   )
-  const isLocalProvider = createMemo(() => /Local/i.test(objStore.provider || ""))
+  const isLocalProvider = createMemo(() => /Local/i.test(provider() || ""))
 
   let dynamicGallery: LightGallery | undefined
   const initGallery = () => {

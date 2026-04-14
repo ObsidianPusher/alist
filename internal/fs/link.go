@@ -12,9 +12,9 @@ import (
 )
 
 func link(ctx context.Context, path string, args model.LinkArgs) (*model.Link, model.Obj, error) {
-	storage, actualPath, err := op.GetStorageAndActualPath(path)
+	storage, actualPath, err := resolveStoragePath(path)
 	if err != nil {
-		return nil, nil, errors.WithMessage(err, "failed get storage")
+		return nil, nil, err
 	}
 	l, obj, err := op.Link(ctx, storage, actualPath, args)
 	if err != nil {

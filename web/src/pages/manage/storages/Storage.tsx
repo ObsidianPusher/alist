@@ -12,7 +12,8 @@ import {
 import { useFetch, useRouter, useT } from "~/hooks"
 import { getMainColor } from "~/store"
 import { PEmptyResp, Storage } from "~/types"
-import { handleResp, handleRespWithNotifySuccess, notify, r } from "~/utils"
+import { handleResp, handleRespWithNotifySuccess, notify } from "~/utils"
+import { deleteStorage as deleteStorageApi, toggleStorage } from "~/api/admin/storages"
 import { DeletePopover } from "../common/DeletePopover"
 
 interface StorageProps {
@@ -24,15 +25,10 @@ function StorageOp(props: StorageProps) {
   const t = useT()
   const { to } = useRouter()
   const [deleteLoading, deleteStorage] = useFetch(
-    (): PEmptyResp => r.post(`/admin/storage/delete?id=${props.storage.id}`),
+    (): PEmptyResp => deleteStorageApi(props.storage.id),
   )
   const [enableOrDisableLoading, enableOrDisable] = useFetch(
-    (): PEmptyResp =>
-      r.post(
-        `/admin/storage/${props.storage.disabled ? "enable" : "disable"}?id=${
-          props.storage.id
-        }`,
-      ),
+    (): PEmptyResp => toggleStorage(props.storage.id, props.storage.disabled),
   )
   return (
     <>

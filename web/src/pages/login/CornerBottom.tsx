@@ -19,7 +19,6 @@ const CornerBottom = (props: Props) => {
     <svg
       version="1.1"
       xmlns="http://www.w3.org/2000/svg"
-      xmlns:xlink="http://www.w3.org/1999/xlink"
       height="896"
       width="967.8852157128662"
     >
@@ -36,11 +35,7 @@ const CornerBottom = (props: Props) => {
         </linearGradient>
       </defs>
       <g opacity="1">
-        <use
-          xlink:href="#path-2"
-          fill="url(#linearGradient-3)"
-          fill-opacity="1"
-        />
+        <use href="#path-2" style={{ fill: "url(#linearGradient-3)", opacity: 1 }} />
       </g>
     </svg>
   )

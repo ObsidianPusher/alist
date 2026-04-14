@@ -18,8 +18,9 @@ import {
   useRouter,
   useT,
 } from "~/hooks"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
 import { Meta, PageResp } from "~/types"
+import { deleteMeta as deleteMetaApi, listMetas } from "~/api/admin/metas"
 import { DeletePopover } from "../common/DeletePopover"
 import { Wether } from "~/components"
 
@@ -27,7 +28,7 @@ const Metas = () => {
   const t = useT()
   useManageTitle("manage.sidemenu.metas")
   const { to } = useRouter()
-  const [getMetasLoading, getMetas] = useFetch(() => r.get("/admin/meta/list"))
+  const [getMetasLoading, getMetas] = useFetch(listMetas)
   const [metas, setMetas] = createSignal<Meta[]>([])
   const refresh = async () => {
     const resp: PageResp<Meta> = await getMetas()
@@ -35,9 +36,7 @@ const Metas = () => {
   }
   refresh()
 
-  const [deleting, deleteMeta] = useListFetch((id: number) =>
-    r.post(`/admin/meta/delete?id=${id}`),
-  )
+  const [deleting, deleteMeta] = useListFetch((id: number) => deleteMetaApi(id))
   return (
     <VStack spacing="$2" alignItems="start" w="$full">
       <HStack spacing="$2">

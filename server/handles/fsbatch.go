@@ -4,14 +4,11 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/alist-org/alist/v3/internal/errs"
 	"github.com/alist-org/alist/v3/internal/fs"
 	"github.com/alist-org/alist/v3/internal/model"
-	"github.com/alist-org/alist/v3/internal/op"
 	"github.com/alist-org/alist/v3/pkg/generic"
 	"github.com/alist-org/alist/v3/server/common"
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
 )
 
 type BatchRenameReq struct {
@@ -24,30 +21,17 @@ type BatchRenameReq struct {
 
 func FsBatchRename(c *gin.Context) {
 	var req BatchRenameReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	if !user.CanRename() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
+	user := currentUser(c)
+	if !requireUserCapability(c, user.CanRename()) {
 		return
 	}
-
-	reqPath, err := user.JoinPath(req.SrcDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	reqPath, _, ok := prepareScopedPath(c, user, req.SrcDir)
+	if !ok {
 		return
 	}
-
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil {
-		if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-			common.ErrorResp(c, err, 500, true)
-			return
-		}
-	}
-	c.Set("meta", meta)
 	for _, renameObject := range req.RenameObjects {
 		if renameObject.SrcName == "" || renameObject.NewName == "" {
 			continue
@@ -68,36 +52,22 @@ type RecursiveMoveReq struct {
 
 func FsRecursiveMove(c *gin.Context) {
 	var req RecursiveMoveReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
 
-	user := c.MustGet("user").(*model.User)
-	if !user.CanMove() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
+	user := currentUser(c)
+	if !requireUserCapability(c, user.CanMove()) {
 		return
 	}
-	srcDir, err := user.JoinPath(req.SrcDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	srcDir, _, ok := prepareScopedPath(c, user, req.SrcDir)
+	if !ok {
 		return
 	}
-	dstDir, err := user.JoinPath(req.DstDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	dstDir, _, ok := prepareScopedPath(c, user, req.DstDir)
+	if !ok {
 		return
 	}
-
-	meta, err := op.GetNearestMeta(srcDir)
-	if err != nil {
-		if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-			common.ErrorResp(c, err, 500, true)
-			return
-		}
-	}
-	c.Set("meta", meta)
-
 	rootFiles, err := fs.List(c, srcDir, &fs.ListArgs{})
 	if err != nil {
 		common.ErrorResp(c, err, 500)
@@ -158,31 +128,17 @@ type RegexRenameReq struct {
 
 func FsRegexRename(c *gin.Context) {
 	var req RegexRenameReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !bindRequest(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	if !user.CanRename() {
-		common.ErrorResp(c, errs.PermissionDenied, 403)
+	user := currentUser(c)
+	if !requireUserCapability(c, user.CanRename()) {
 		return
 	}
-
-	reqPath, err := user.JoinPath(req.SrcDir)
-	if err != nil {
-		common.ErrorResp(c, err, 403)
+	reqPath, _, ok := prepareScopedPath(c, user, req.SrcDir)
+	if !ok {
 		return
 	}
-
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil {
-		if !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-			common.ErrorResp(c, err, 500, true)
-			return
-		}
-	}
-	c.Set("meta", meta)
-
 	srcRegexp, err := regexp.Compile(req.SrcNameRegex)
 	if err != nil {
 		common.ErrorResp(c, err, 500)

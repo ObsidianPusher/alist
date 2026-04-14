@@ -3,7 +3,7 @@ import { createMemo, Show, createResource, on } from "solid-js"
 import { Markdown, MaybeLoading } from "~/components"
 import { useLink, useRouter } from "~/hooks"
 import { objStore, recoverScroll, State } from "~/store"
-import { fetchText } from "~/utils"
+import { fetchTextContent } from "~/api/text"
 
 export function Readme(props: {
   files: string[]
@@ -48,7 +48,7 @@ export function Readme(props: {
       content: readme as string | ArrayBuffer,
     }
     if (/^https?:\/\//g.test(readme)) {
-      res = await fetchText(readme)
+      res = await fetchTextContent(readme)
     }
     setTimeout(() => {
       recoverScroll(pathname())

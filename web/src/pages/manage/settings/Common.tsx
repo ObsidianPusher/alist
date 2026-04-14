@@ -1,6 +1,7 @@
 import { useFetch, useT, useRouter, useManageTitle } from "~/hooks"
 import { Group, SettingItem, PResp, PEmptyResp, EmptyResp } from "~/types"
-import { r, notify, getTarget, handleResp } from "~/utils"
+import { notify, getTarget, handleResp } from "~/utils"
+import { deleteSetting, listSettingsByGroup, saveSettings as saveSettingsApi } from "~/api/admin/settings"
 import { createStore } from "solid-js/store"
 import { Box, Button, HStack, VStack } from "@hope-ui/solid"
 import { createSignal, Index, Show } from "solid-js"
@@ -17,8 +18,7 @@ const CommonSettings = (props: CommonSettingsProps) => {
   const { pathname } = useRouter()
   useManageTitle(`manage.sidemenu.${pathname().split("/").pop()}`)
   const [settingsLoading, getSettings] = useFetch(
-    (): PResp<SettingItem[]> =>
-      r.get(`/admin/setting/list?group=${props.group}`),
+    (): PResp<SettingItem[]> => listSettingsByGroup(props.group),
   )
   const [settings, setSettings] = createStore<SettingItem[]>([])
   const refresh = async () => {
@@ -27,7 +27,7 @@ const CommonSettings = (props: CommonSettingsProps) => {
   }
   refresh()
   const [saveLoading, saveSettings] = useFetch(
-    (): PEmptyResp => r.post("/admin/setting/save", getTarget(settings)),
+    (): PEmptyResp => saveSettingsApi(getTarget(settings)),
   )
   const [loading, setLoading] = createSignal(false)
   const [activeTab, setActiveTab] = createSignal<"memory" | "baidu">("memory")
@@ -75,9 +75,7 @@ const CommonSettings = (props: CommonSettingsProps) => {
               }}
               onDelete={async () => {
                 setLoading(true)
-                const resp: EmptyResp = await r.post(
-                  `/admin/setting/delete?key=${item().key}`,
-                )
+                const resp: EmptyResp = await deleteSetting(item().key)
                 setLoading(false)
                 handleResp(resp, () => {
                   notify.success(t("global.delete_success"))

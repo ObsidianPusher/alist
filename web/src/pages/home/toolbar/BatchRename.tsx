@@ -14,17 +14,13 @@ import {
   RadioGroup,
   Input,
 } from "@hope-ui/solid"
-import { useFetch, usePath, useRouter, useT } from "~/hooks"
-import {
-  bus,
-  fsBatchRename,
-  handleRespWithNotifySuccess,
-  notify,
-} from "~/utils"
+import { useFetch, useFsAction, useRouter, useT } from "~/hooks"
+import { bus, notify } from "~/utils"
 import { createSignal, For, onCleanup, Show } from "solid-js"
 import { objStore, selectedObjs } from "~/store"
 import { RenameObj } from "~/types"
 import { RenameItem } from "~/pages/home/toolbar/RenameItem"
+import { batchRenameFs } from "~/api/fs-ops"
 
 export const BatchRename = () => {
   const {
@@ -33,9 +29,9 @@ export const BatchRename = () => {
     onClose: closePreviewModal,
   } = createDisclosure()
   const { isOpen, onOpen, onClose } = createDisclosure()
-  const [loading, ok] = useFetch(fsBatchRename)
+  const [loading, ok] = useFetch(batchRenameFs)
   const { pathname } = useRouter()
-  const { refresh } = usePath()
+  const { submit: submitAction } = useFsAction()
   const [type, setType] = createSignal("1")
   const [srcName, setSrcName] = createSignal("")
   const [newName, setNewName] = createSignal("")
@@ -251,13 +247,12 @@ export const BatchRename = () => {
               loading={loading()}
               onClick={async () => {
                 const resp = await ok(pathname(), matchNames())
-                handleRespWithNotifySuccess(resp, () => {
+                submitAction(resp, () => {
                   setMatchNames([])
                   setSrcName("")
                   setNewName("")
                   setType("1")
                   setNewNameType("string")
-                  refresh()
                   onClose()
                   closePreviewModal()
                 })

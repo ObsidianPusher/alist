@@ -1,15 +1,16 @@
 import { createDisclosure } from "@hope-ui/solid"
 import { onCleanup } from "solid-js"
 import { ModalFolderChoose } from "~/components"
-import { useFetch, usePath, useRouter } from "~/hooks"
+import { useFetch, useFsAction, useRouter } from "~/hooks"
 import { selectedObjs } from "~/store"
-import { bus, fsCopy, fsMove, handleRespWithNotifySuccess } from "~/utils"
+import { bus } from "~/utils"
+import { copyFs, moveFs } from "~/api/fs-ops"
 
 export const Copy = () => {
   const { isOpen, onOpen, onClose } = createDisclosure()
-  const [loading, ok] = useFetch(fsCopy)
+  const [loading, ok] = useFetch(copyFs)
   const { pathname } = useRouter()
-  const { refresh } = usePath()
+  const { submit } = useFsAction()
   const handler = (name: string) => {
     if (name === "copy") {
       onOpen()
@@ -30,8 +31,7 @@ export const Copy = () => {
           dst,
           selectedObjs().map((obj) => obj.name),
         )
-        handleRespWithNotifySuccess(resp, () => {
-          refresh()
+        submit(resp, () => {
           onClose()
         })
       }}
@@ -41,9 +41,9 @@ export const Copy = () => {
 
 export const Move = () => {
   const { isOpen, onOpen, onClose } = createDisclosure()
-  const [loading, ok] = useFetch(fsMove)
+  const [loading, ok] = useFetch(moveFs)
   const { pathname } = useRouter()
-  const { refresh } = usePath()
+  const { submit } = useFsAction()
   const handler = (name: string) => {
     if (name === "move") {
       onOpen()
@@ -64,8 +64,7 @@ export const Move = () => {
           dst,
           selectedObjs().map((obj) => obj.name),
         )
-        handleRespWithNotifySuccess(resp, () => {
-          refresh()
+        submit(resp, () => {
           onClose()
         })
       }}

@@ -2,7 +2,8 @@ import copy from "copy-to-clipboard"
 import { createResource } from "solid-js"
 import { getHideFiles, objStore } from "~/store"
 import { Obj } from "~/types"
-import { decodeText, fetchText, notify, pathJoin } from "~/utils"
+import { decodeText, notify, pathJoin } from "~/utils"
+import { fetchTextContent } from "~/api/text"
 import { useT, useLink, useRouter } from "."
 
 export const useUtil = () => {
@@ -37,7 +38,7 @@ export const useUtil = () => {
 export function useFetchText() {
   const { proxyLink } = useLink()
   const fetchContent = async () => {
-    return fetchText(proxyLink(objStore.obj, true))
+    return fetchTextContent(proxyLink(objStore.obj, true))
   }
   return createResource("", fetchContent)
 }

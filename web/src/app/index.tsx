@@ -12,7 +12,7 @@ let domRecoverAttempts = 0
 
 const isRecoverableDomError = (err: unknown) => {
   const msg =
-    err instanceof Error ? err.message : typeof err === "string" ? err : String(err)
+    err instanceof globalThis.Error ? err.message : typeof err === "string" ? err : String(err)
   return (
     msg.includes("Failed to execute 'insertBefore'") ||
     msg.includes("Failed to execute 'removeChild'") ||
@@ -35,32 +35,32 @@ const installDomCompatGuards = () => {
   if (domCompatInstalled || typeof window === "undefined") return
   domCompatInstalled = true
   const proto = Node.prototype as Node & {
-    insertBefore: (newNode: Node, referenceNode: Node | null) => Node
-    removeChild: (child: Node) => Node
+    insertBefore: <T extends Node>(newNode: T, referenceNode: Node | null) => T
+    removeChild: <T extends Node>(child: T) => T
   }
   const rawInsertBefore = proto.insertBefore
   const rawRemoveChild = proto.removeChild
-  proto.insertBefore = function (newNode: Node, referenceNode: Node | null) {
+  proto.insertBefore = function <T extends Node>(newNode: T, referenceNode: Node | null): T {
     if (referenceNode && referenceNode.parentNode !== this) {
       // Some mobile browsers/extensions mutate DOM unexpectedly.
       // Fallback to append to avoid fatal NotFoundError.
-      return this.appendChild(newNode)
+      return this.appendChild(newNode) as T
     }
     try {
-      return rawInsertBefore.call(this, newNode, referenceNode)
+      return rawInsertBefore.call(this, newNode, referenceNode) as T
     } catch (err) {
       if ((err as Error)?.name === "NotFoundError") {
-        return this.appendChild(newNode)
+        return this.appendChild(newNode) as T
       }
       throw err
     }
   }
-  proto.removeChild = function (child: Node) {
+  proto.removeChild = function <T extends Node>(child: T): T {
     if (!child || child.parentNode !== this) {
       return child
     }
     try {
-      return rawRemoveChild.call(this, child)
+      return rawRemoveChild.call(this, child) as T
     } catch (err) {
       if ((err as Error)?.name === "NotFoundError") {
         return child
@@ -85,7 +85,7 @@ const Index = () => {
           }
           console.error("error", err)
           const message =
-            err instanceof Error ? err.message : typeof err === "string" ? err : String(err)
+            err instanceof globalThis.Error ? err.message : typeof err === "string" ? err : String(err)
           return <Error msg={`System error: ${message}`} h="100vh" />
         }}
       >

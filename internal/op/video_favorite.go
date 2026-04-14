@@ -2,32 +2,17 @@ package op
 
 import (
 	"path"
-	"strings"
 
 	"github.com/alist-org/alist/v3/internal/db"
 	"github.com/alist-org/alist/v3/internal/model"
 )
-
-func cleanFavoritePath(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "/"
-	}
-	if !strings.HasPrefix(raw, "/") {
-		raw = "/" + raw
-	}
-	if len(raw) > 1 && strings.HasSuffix(raw, "/") {
-		raw = strings.TrimSuffix(raw, "/")
-	}
-	return raw
-}
 
 func ListVideoFavorites(userID uint, storageID uint, page, perPage int) (int64, []model.VideoFavorite, error) {
 	return db.GetVideoFavorites(userID, storageID, page, perPage)
 }
 
 func IsVideoFavorite(userID uint, storageID uint, path string) (bool, *model.VideoFavorite, error) {
-	path = cleanFavoritePath(path)
+	path = normalizeVideoPath(path)
 	fav, err := db.GetVideoFavoriteByPath(userID, storageID, path)
 	if err != nil {
 		return false, nil, err
@@ -36,7 +21,7 @@ func IsVideoFavorite(userID uint, storageID uint, path string) (bool, *model.Vid
 }
 
 func UpsertVideoFavorite(userID uint, storageID uint, storageName string, fullPath string, fileID string, size int64, modTime int64) (*model.VideoFavorite, error) {
-	fullPath = cleanFavoritePath(fullPath)
+	fullPath = normalizeVideoPath(fullPath)
 	fav, err := db.GetVideoFavoriteByPath(userID, storageID, fullPath)
 	if err != nil {
 		return nil, err
@@ -68,7 +53,7 @@ func UpsertVideoFavorite(userID uint, storageID uint, storageName string, fullPa
 }
 
 func DeleteVideoFavorite(userID uint, storageID uint, fullPath string) error {
-	fullPath = cleanFavoritePath(fullPath)
+	fullPath = normalizeVideoPath(fullPath)
 	return db.DeleteVideoFavoriteByPath(userID, storageID, fullPath)
 }
 

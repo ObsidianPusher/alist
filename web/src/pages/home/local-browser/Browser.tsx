@@ -38,6 +38,18 @@ import {
 } from "solid-icons/fi"
 import { ModalFolderChoose, ModalInput, SelectWrapper } from "~/components"
 import { useFetch, useRouter, useT } from "~/hooks"
+import { mkdirFs } from "~/api/fs-ops"
+import {
+  localBrowserCopy,
+  localBrowserCompress,
+  localBrowserDirSizes,
+  localBrowserExtract,
+  localBrowserList,
+  localBrowserMove,
+  localBrowserRemove,
+  localBrowserStorages,
+  localBrowserUsage,
+} from "~/api/local-browser"
 import {
   LocalBrowserDirSizeItem,
   LocalBrowserEntry,
@@ -48,16 +60,6 @@ import {
   formatDate,
   getFileSize,
   handleResp,
-  localBrowserCopy,
-  localBrowserCompress,
-  localBrowserDirSizes,
-  localBrowserExtract,
-  localBrowserList,
-  localBrowserMove,
-  localBrowserRemove,
-  localBrowserStorages,
-  localBrowserUsage,
-  fsMkdir,
   notify,
   pathDir,
   pathJoin,
@@ -135,7 +137,7 @@ const Browser = () => {
   const [copyLoading, copyReq] = useFetch(localBrowserCopy)
   const [moveLoading, moveReq] = useFetch(localBrowserMove)
   const [deleteLoading, deleteReq] = useFetch(localBrowserRemove)
-  const [mkdirLoading, mkdirReq] = useFetch(fsMkdir)
+  const [mkdirLoading, mkdirReq] = useFetch(mkdirFs)
   const [, usageReq] = useFetch(localBrowserUsage)
   const [, dirSizesReq] = useFetch(localBrowserDirSizes)
 
@@ -259,7 +261,9 @@ const Browser = () => {
     const resp = await dirSizesReq({ paths })
     handleResp(resp, (data) => {
       mergeDirSizes(data.items || [])
-      const pending = (data.items || []).some((item) => item.status === "pending")
+      const pending = (data.items || []).some(
+        (item: LocalBrowserDirSizeItem) => item.status === "pending",
+      )
       if (pending && retry) {
         dirSizeTimer = window.setTimeout(() => {
           void refreshDirSizes(paths, true)
@@ -305,8 +309,8 @@ const Browser = () => {
       clearSelection()
       void refreshUsage(data.current_path)
       const dirPaths = data.content
-        .filter((entry) => entry.is_dir)
-        .map((entry) => entry.path)
+        .filter((entry: LocalBrowserEntry) => entry.is_dir)
+        .map((entry: LocalBrowserEntry) => entry.path)
       void refreshDirSizes(dirPaths, true)
     })
   }
@@ -482,10 +486,12 @@ const Browser = () => {
             entry.is_dir ? enterFolder(entry) : openInHome(entry.path)
           }
           maxW={{ "@initial": "50vw", "@md": "28vw" }}
-          overflow="hidden"
-          textOverflow="ellipsis"
-          whiteSpace="nowrap"
           title={entry.name}
+          style={{
+            overflow: "hidden",
+            "text-overflow": "ellipsis",
+            "white-space": "nowrap",
+          }}
         >
           {entry.name}
         </Text>
@@ -499,7 +505,7 @@ const Browser = () => {
         <Text>{t(`home.local_browser.kind.${entry.kind}`)}</Text>
         <Show when={entry.extractable}>
           <HStack spacing="$1" wrap="wrap">
-            <Badge size="sm" colorScheme="info" variant="subtle">
+            <Badge colorScheme="info" variant="subtle">
               {(entry.archive_format || "").toUpperCase()}
             </Badge>
             <Show
@@ -526,7 +532,7 @@ const Browser = () => {
       alignItems="stretch"
       p="$2"
       rounded="$xl"
-      bgGradient={pageBg()}
+      bg={pageBg()}
     >
       <HStack
         justifyContent="space-between"
@@ -709,7 +715,9 @@ const Browser = () => {
           </HStack>
           <Checkbox
             checked={recursive()}
-            onChange={(e) => setRecursive(e.currentTarget.checked)}
+            onChange={(e: Event & { currentTarget: HTMLInputElement }) =>
+              setRecursive(e.currentTarget.checked)
+            }
           >
             {t("home.local_browser.recursive")}
           </Checkbox>
@@ -886,14 +894,14 @@ const Browser = () => {
           px="$2"
           py="$1"
         >
-          <Table size="sm">
+          <Table>
             <Thead>
               <Tr>
                 <Th w="$10">
                   <Checkbox
                     aria-label={t("home.local_browser.select_all")}
                     checked={allCurrentChecked()}
-                    onChange={(e) => {
+                    onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
                       const checked = e.currentTarget.checked
                       const next: Record<string, boolean> = {}
                       for (const entry of entries()) {
@@ -918,7 +926,7 @@ const Browser = () => {
                       <Checkbox
                         aria-label={entry.name}
                         checked={Boolean(selected()[entry.path])}
-                        onChange={(e) =>
+                        onChange={(e: Event & { currentTarget: HTMLInputElement }) =>
                           setSelectedPath(entry.path, e.currentTarget.checked)
                         }
                       />
@@ -956,7 +964,7 @@ const Browser = () => {
                   <Checkbox
                     aria-label={entry.name}
                     checked={Boolean(selected()[entry.path])}
-                    onChange={(e) =>
+                    onChange={(e: Event & { currentTarget: HTMLInputElement }) =>
                       setSelectedPath(entry.path, e.currentTarget.checked)
                     }
                   />
@@ -1121,7 +1129,7 @@ const Browser = () => {
                 <VStack alignItems="flex-start" spacing="1">
                   <Text>{selectedExtractPreview()}</Text>
                   <Show when={selectedExtractFormat()}>
-                    <Badge size="sm" colorScheme="info" variant="subtle">
+                    <Badge colorScheme="info" variant="subtle">
                       {selectedExtractFormat().toUpperCase()}
                     </Badge>
                   </Show>

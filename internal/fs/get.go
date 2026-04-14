@@ -3,12 +3,10 @@ package fs
 import (
 	"context"
 	stdpath "path"
-	"time"
 
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
 	"github.com/alist-org/alist/v3/pkg/utils"
-	"github.com/pkg/errors"
 )
 
 func get(ctx context.Context, path string) (model.Obj, error) {
@@ -22,18 +20,12 @@ func get(ctx context.Context, path string) (model.Obj, error) {
 			}
 		}
 	}
-	storage, actualPath, err := op.GetStorageAndActualPath(path)
+	storage, actualPath, rootObj, err := resolveRootOrStoragePath(path)
 	if err != nil {
-		// if there are no storage prefix with path, maybe root folder
-		if path == "/" {
-			return &model.Object{
-				Name:     "root",
-				Size:     0,
-				Modified: time.Time{},
-				IsFolder: true,
-			}, nil
-		}
-		return nil, errors.WithMessage(err, "failed get storage")
+		return nil, err
+	}
+	if rootObj != nil {
+		return rootObj, nil
 	}
 	return op.Get(ctx, storage, actualPath)
 }

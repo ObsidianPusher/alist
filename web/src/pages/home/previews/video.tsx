@@ -1,16 +1,17 @@
 import { Box, Button, HStack, IconButton, Text } from "@hope-ui/solid"
 import { useNavigate } from "@solidjs/router"
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
-import { useLink, useRouter } from "~/hooks"
-import { getSettingBool, local, objStore } from "~/store"
+import { useLink, useRouter, useVideoProgress } from "~/hooks"
+import {
+  getSettingBool,
+  local,
+  useCurrentObj,
+  useCurrentObjs,
+  useCurrentRawUrl,
+} from "~/store"
 import { ObjType } from "~/types"
 import { ext, pathDir, pathJoin, trimBase } from "~/utils"
-import {
-  getVideoFavoriteStatus,
-  getVideoProgress,
-  saveVideoProgress,
-  toggleVideoFavorite,
-} from "~/utils/api"
+import { getVideoFavoriteStatus, toggleVideoFavorite } from "~/api/media"
 import { createMediaSourceController } from "./player_common"
 import { VideoBox } from "./video_box"
 import { AiFillHeart, AiOutlineHeart } from "solid-icons/ai"
@@ -20,24 +21,23 @@ const Preview = () => {
   const { pathname } = useRouter()
   const navigate = useNavigate()
   const mediaController = createMediaSourceController()
+  const currentObj = useCurrentObj()
+  const objs = useCurrentObjs()
+  const rawUrl = useCurrentRawUrl()
   const [autoNext, setAutoNext] = createSignal(true)
-  const [resumeVisible, setResumeVisible] = createSignal(false)
-  const [resumeAt, setResumeAt] = createSignal(0)
-  const [resumeDuration, setResumeDuration] = createSignal(0)
-  const [resumeApplied, setResumeApplied] = createSignal(false)
   const [favorite, setFavorite] = createSignal(false)
   const [favoriteLoading, setFavoriteLoading] = createSignal(false)
   let videoEl: HTMLVideoElement | undefined
 
   const videos = createMemo(() => {
-    const list = objStore.objs.filter((obj) => obj.type === ObjType.VIDEO)
-    if (list.length === 0) return [objStore.obj]
+    const list = objs().filter((obj) => obj.type === ObjType.VIDEO)
+    if (list.length === 0) return [currentObj()]
     return [...list].sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { numeric: true }),
     )
   })
   const currentIndex = createMemo(() =>
-    videos().findIndex((f) => f.name === objStore.obj.name),
+    videos().findIndex((f) => f.name === currentObj().name),
   )
   const hasPrev = createMemo(() => currentIndex() > 0)
   const hasNext = createMemo(
@@ -57,9 +57,9 @@ const Preview = () => {
 
   const playbackCandidates = createMemo(() => {
     const items = [
-      objStore.raw_url,
-      rawLink(objStore.obj, true),
-      proxyLink(objStore.obj, true),
+      rawUrl(),
+      rawLink(currentObj(), true),
+      proxyLink(currentObj(), true),
     ]
     return Array.from(new Set(items.filter(Boolean)))
   })
@@ -71,13 +71,27 @@ const Preview = () => {
   let lastTime = 0
   let manualSeeking = false
   const currentPlaybackURL = () =>
-    playbackCandidates()[Math.max(0, candidateIndex)] || objStore.raw_url
+    playbackCandidates()[Math.max(0, candidateIndex)] || rawUrl()
   const currentPath = () => trimBase(pathname())
   const autoResumeEnabled = () => local["video_auto_resume"] === "true"
+  const {
+    resumeVisible,
+    resumeAt,
+    resumeDuration,
+    resumeApplied,
+    setResumeApplied,
+    setResumeVisible,
+    loadResume,
+    persistProgress,
+  } = useVideoProgress(() => ({
+    path: currentPath(),
+    size: currentObj().size,
+    modTime: Date.parse(currentObj().modified) || 0,
+  }))
 
   const bindSource = (url: string) => {
     if (!videoEl) return
-    const kind = ext(objStore.obj.name).toLowerCase()
+    const kind = ext(currentObj().name).toLowerCase()
     if (kind === "m3u8") {
       mediaController.bindM3u8(videoEl, url)
       return
@@ -169,17 +183,14 @@ const Preview = () => {
       await tryNextCandidate()
     }
     const onEnded = () => {
-      void saveVideoProgress({
-        path: currentPath(),
-        size: objStore.obj.size,
-        mod_time: Date.parse(objStore.obj.modified) || 0,
-        position: Number.isFinite(videoEl?.duration || 0)
+      void persistProgress(
+        Number.isFinite(videoEl?.duration || 0)
           ? (videoEl?.duration as number)
           : (videoEl?.currentTime || 0),
-        duration: Number.isFinite(videoEl?.duration || 0)
+        Number.isFinite(videoEl?.duration || 0)
           ? (videoEl?.duration as number)
           : 0,
-      })
+      )
       if (autoNext()) nextVideo()
     }
     const onTimeUpdate = () => {
@@ -191,13 +202,10 @@ const Preview = () => {
       if (ts - lastReport < 10000 && Math.abs(now - lastReportedPos) < 5) return
       lastReport = ts
       lastReportedPos = now
-      void saveVideoProgress({
-        path: currentPath(),
-        size: objStore.obj.size,
-        mod_time: Date.parse(objStore.obj.modified) || 0,
-        position: now,
-        duration: Number.isFinite(videoEl.duration) ? videoEl.duration : 0,
-      })
+      void persistProgress(
+        now,
+        Number.isFinite(videoEl.duration) ? videoEl.duration : 0,
+      )
     }
     const onSeeking = () => {
       manualSeeking = true
@@ -346,19 +354,7 @@ const Preview = () => {
 
   createEffect(
     on(pathname, () => {
-      setResumeApplied(false)
-      setResumeVisible(false)
-      setResumeAt(0)
-      setResumeDuration(0)
-      void (async () => {
-        const resp = await getVideoProgress(currentPath())
-        if (!resp || resp.code !== 200 || !resp.data) return
-        if (resp.data.finished) return
-        if (!Number.isFinite(resp.data.position) || resp.data.position <= 5) return
-        setResumeAt(resp.data.position)
-        setResumeDuration(resp.data.duration || 0)
-        setResumeVisible(true)
-      })()
+      void loadResume()
       void (async () => {
         const resp = await getVideoFavoriteStatus(currentPath())
         if (!resp || resp.code !== 200 || !resp.data) return
@@ -368,9 +364,9 @@ const Preview = () => {
   )
 
   return (
-    <VideoBox
-      playlist={videos().map((v) => ({ name: v.name }))}
-      current={objStore.obj.name}
+      <VideoBox
+        playlist={videos().map((v) => ({ name: v.name }))}
+        current={currentObj().name}
       onSelect={selectVideo}
       hasPrev={hasPrev()}
       hasNext={hasNext()}
@@ -467,7 +463,7 @@ const Preview = () => {
         <video
           ref={videoEl}
           controls
-          playsInline
+          playsinline
           muted={false}
           preload="auto"
           style={{

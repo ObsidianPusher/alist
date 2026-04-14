@@ -31,12 +31,12 @@ import {
 import { useFetch, useT, useUtil } from "~/hooks"
 import { getMainColor, password } from "~/store"
 import { Obj } from "~/types"
+import { listFsDirs } from "~/api/fs"
 import {
   pathBase,
   handleResp,
   hoverColor,
   pathJoin,
-  fsDirs,
   createMatcher,
 } from "~/utils"
 
@@ -93,7 +93,7 @@ const FolderTreeNode = (props: { path: string }) => {
   const emptyIconVisible = () =>
     Boolean(showEmptyIcon && children() !== undefined && !children()?.length)
   const [loading, fetchDirs] = useFetch(() =>
-    fsDirs(props.path, password(), forceRoot),
+    listFsDirs(props.path, password(), forceRoot),
   )
   let isLoaded = false
   const load = async () => {

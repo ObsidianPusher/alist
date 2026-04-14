@@ -2,7 +2,8 @@ import { Button, Heading, Stack, VStack } from "@hope-ui/solid"
 import { createSignal, Show } from "solid-js"
 import { useT, useFetch } from "~/hooks"
 import { PEmptyResp } from "~/types"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
+import { deleteWebauthnCredential } from "~/api/account"
 
 interface WebauthnItemProps {
   id: string
@@ -12,10 +13,7 @@ interface WebauthnItemProps {
 export const WebauthnItem = (props: WebauthnItemProps) => {
   const t = useT()
   const [removeLoading, remove] = useFetch(
-    (): PEmptyResp =>
-      r.post(`/authn/delete_authn`, {
-        id: props.id,
-      }),
+    (): PEmptyResp => deleteWebauthnCredential(props.id),
   )
   const [deleted, setDeleted] = createSignal(false)
   return (

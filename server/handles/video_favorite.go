@@ -101,27 +101,11 @@ func GetVideoFavoriteStatus(c *gin.Context) {
 		common.ErrorStrResp(c, "path required", http.StatusBadRequest)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	reqPath, err := user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, http.StatusForbidden)
+	access, ok := resolveVideoAccess(c, req.Path)
+	if !ok {
 		return
 	}
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil && !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-		common.ErrorResp(c, err, http.StatusInternalServerError)
-		return
-	}
-	if !common.CanAccess(user, meta, reqPath, "") {
-		common.ErrorStrResp(c, "permission denied", http.StatusForbidden)
-		return
-	}
-	storage, _, err := op.GetStorageAndActualPath(reqPath)
-	if err != nil {
-		common.ErrorResp(c, err, http.StatusNotFound)
-		return
-	}
-	ok, fav, err := op.IsVideoFavorite(user.ID, storage.GetStorage().ID, reqPath)
+	ok, fav, err := op.IsVideoFavorite(access.user.ID, access.storage.ID, access.reqPath)
 	if err != nil {
 		common.ErrorResp(c, err, http.StatusInternalServerError)
 		return
@@ -140,22 +124,11 @@ func ToggleVideoFavorite(c *gin.Context) {
 		common.ErrorStrResp(c, "invalid payload", http.StatusBadRequest)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	reqPath, err := user.JoinPath(req.Path)
-	if err != nil {
-		common.ErrorResp(c, err, http.StatusForbidden)
+	access, ok := resolveVideoAccess(c, req.Path)
+	if !ok {
 		return
 	}
-	meta, err := op.GetNearestMeta(reqPath)
-	if err != nil && !errors.Is(errors.Cause(err), errs.MetaNotFound) {
-		common.ErrorResp(c, err, http.StatusInternalServerError)
-		return
-	}
-	if !common.CanAccess(user, meta, reqPath, "") {
-		common.ErrorStrResp(c, "permission denied", http.StatusForbidden)
-		return
-	}
-	storage, actualPath, err := op.GetStorageAndActualPath(reqPath)
+	storage, actualPath, err := op.GetStorageAndActualPath(access.reqPath)
 	if err != nil {
 		common.ErrorResp(c, err, http.StatusNotFound)
 		return
@@ -169,7 +142,7 @@ func ToggleVideoFavorite(c *gin.Context) {
 		common.ErrorStrResp(c, "only video files can be favorited", http.StatusBadRequest)
 		return
 	}
-	favState, _, err := op.IsVideoFavorite(user.ID, storage.GetStorage().ID, reqPath)
+	favState, _, err := op.IsVideoFavorite(access.user.ID, access.storage.ID, access.reqPath)
 	if err != nil {
 		common.ErrorResp(c, err, http.StatusInternalServerError)
 		return
@@ -179,11 +152,11 @@ func ToggleVideoFavorite(c *gin.Context) {
 		target = *req.Favorite
 	}
 	if target {
-		_, err = op.UpsertVideoFavorite(
-			user.ID,
-			storage.GetStorage().ID,
-			storage.GetStorage().MountPath,
-			reqPath,
+			_, err = op.UpsertVideoFavorite(
+			access.user.ID,
+			access.storage.ID,
+			access.storage.MountPath,
+			access.reqPath,
 			obj.GetID(),
 			obj.GetSize(),
 			obj.ModTime().UnixMilli(),
@@ -193,7 +166,7 @@ func ToggleVideoFavorite(c *gin.Context) {
 			return
 		}
 	} else {
-		if err := op.DeleteVideoFavorite(user.ID, storage.GetStorage().ID, reqPath); err != nil {
+		if err := op.DeleteVideoFavorite(access.user.ID, access.storage.ID, access.reqPath); err != nil {
 			common.ErrorResp(c, err, http.StatusInternalServerError)
 			return
 		}

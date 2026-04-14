@@ -23,8 +23,9 @@ import {
 } from "@hope-ui/solid"
 import { createMemo, createSignal, For, Match, Show, Switch } from "solid-js"
 import { useFetch, useManageTitle, useRouter, useT } from "~/hooks"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
 import { EmptyResp, PageResp, Resp, Storage } from "~/types"
+import { listDriverNames, listStorages, loadAllStorages } from "~/api/admin/storages"
 import { StorageGridItem, StorageListItem } from "./Storage"
 import { createStorageSignal } from "@solid-primitives/storage"
 
@@ -32,9 +33,7 @@ const Storages = () => {
   const t = useT()
   useManageTitle("manage.sidemenu.storages")
   const { to } = useRouter()
-  const [getStoragesLoading, getStorages] = useFetch(
-    (): Promise<PageResp<Storage>> => r.get("/admin/storage/list"),
-  )
+  const [getStoragesLoading, getStorages] = useFetch(listStorages)
   const [storages, setStorages] = createSignal<Storage[]>([])
   const refresh = async () => {
     const resp = await getStorages()
@@ -43,13 +42,13 @@ const Storages = () => {
   const [drivers, setDrivers] = createSignal<string[]>([])
   const [selectedDrivers, setSelectedDrivers] = createSignal<string[]>([])
   const getDrivers = async () => {
-    const resp: Resp<string[]> = await r.get("/admin/driver/names")
+    const resp: Resp<string[]> = await listDriverNames()
     handleResp(resp, (data) => setDrivers(data))
   }
   getDrivers()
   refresh()
   const loadAll = async () => {
-    const resp: EmptyResp = await r.post("/admin/storage/load_all")
+    const resp: EmptyResp = await loadAllStorages()
     handleResp(resp, () => {
       notify.success(t("storages.other.start_load_success"))
     })
@@ -130,7 +129,7 @@ const Storages = () => {
         </Show>
         <HopeSwitch
           checked={layout() === "table"}
-          onChange={(e) => {
+          onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
             setLayout(e.currentTarget.checked ? "table" : "grid")
           }}
         >

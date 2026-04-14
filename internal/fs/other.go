@@ -6,25 +6,24 @@ import (
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
 	"github.com/alist-org/alist/v3/pkg/utils"
-	"github.com/pkg/errors"
 )
 
 func makeDir(ctx context.Context, path string, lazyCache ...bool) error {
-	storage, actualPath, err := op.GetStorageAndActualPath(path)
+	storage, actualPath, err := resolveStoragePath(path)
 	if err != nil {
-		return errors.WithMessage(err, "failed get storage")
+		return err
 	}
 	return op.MakeDir(ctx, storage, actualPath, lazyCache...)
 }
 
 func move(ctx context.Context, srcPath, dstDirPath string, lazyCache ...bool) error {
-	srcStorage, srcActualPath, err := op.GetStorageAndActualPath(srcPath)
+	srcStorage, srcActualPath, err := resolveStoragePath(srcPath)
 	if err != nil {
-		return errors.WithMessage(err, "failed get src storage")
+		return err
 	}
-	dstStorage, dstDirActualPath, err := op.GetStorageAndActualPath(dstDirPath)
+	dstStorage, dstDirActualPath, err := resolveStoragePath(dstDirPath)
 	if err != nil {
-		return errors.WithMessage(err, "failed get dst storage")
+		return err
 	}
 	if isSameStorage(srcStorage, dstStorage) {
 		return op.Move(ctx, srcStorage, srcActualPath, dstDirActualPath, lazyCache...)
@@ -37,25 +36,25 @@ func move(ctx context.Context, srcPath, dstDirPath string, lazyCache ...bool) er
 }
 
 func rename(ctx context.Context, srcPath, dstName string, lazyCache ...bool) error {
-	storage, srcActualPath, err := op.GetStorageAndActualPath(srcPath)
+	storage, srcActualPath, err := resolveStoragePath(srcPath)
 	if err != nil {
-		return errors.WithMessage(err, "failed get storage")
+		return err
 	}
 	return op.Rename(ctx, storage, srcActualPath, dstName, lazyCache...)
 }
 
 func remove(ctx context.Context, path string) error {
-	storage, actualPath, err := op.GetStorageAndActualPath(path)
+	storage, actualPath, err := resolveStoragePath(path)
 	if err != nil {
-		return errors.WithMessage(err, "failed get storage")
+		return err
 	}
 	return op.Remove(ctx, storage, actualPath)
 }
 
 func other(ctx context.Context, args model.FsOtherArgs) (interface{}, error) {
-	storage, actualPath, err := op.GetStorageAndActualPath(args.Path)
+	storage, actualPath, err := resolveStoragePath(args.Path)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed get storage")
+		return nil, err
 	}
 	args.Path = actualPath
 	return op.Other(ctx, storage, args)

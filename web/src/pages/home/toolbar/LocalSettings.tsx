@@ -81,7 +81,7 @@ function LocalSettingEdit(props: LocalSetting) {
         <Match when={props.type === "boolean"}>
           <HopeSwitch
             defaultChecked={local[props.key] === "true"}
-            onChange={(e) => {
+            onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
               setLocal(props.key, e.currentTarget.checked.toString())
             }}
           />

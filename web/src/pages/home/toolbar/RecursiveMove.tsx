@@ -9,9 +9,10 @@ import {
   createDisclosure,
 } from "@hope-ui/solid"
 import { ModalFolderChoose } from "~/components"
-import { useFetch, usePath, useRouter, useT } from "~/hooks"
-import { bus, fsRecursiveMove, handleRespWithNotifySuccess } from "~/utils"
+import { useFetch, useFsAction, useRouter, useT } from "~/hooks"
+import { bus } from "~/utils"
 import { onCleanup } from "solid-js"
+import { recursiveMoveFs } from "~/api/fs-ops"
 
 export const RecursiveMove = () => {
   const {
@@ -20,9 +21,9 @@ export const RecursiveMove = () => {
     onClose: closeConfirmModal,
   } = createDisclosure()
   const { isOpen, onOpen, onClose } = createDisclosure()
-  const [loading, ok] = useFetch(fsRecursiveMove)
+  const [loading, ok] = useFetch(recursiveMoveFs)
   const { pathname } = useRouter()
-  const { refresh } = usePath()
+  const { submit } = useFsAction()
   const handler = (name: string) => {
     if (name === "recursiveMove") {
       openConfirmModal()
@@ -73,8 +74,7 @@ export const RecursiveMove = () => {
         loading={loading()}
         onSubmit={async (dst) => {
           const resp = await ok(pathname(), dst)
-          handleRespWithNotifySuccess(resp, () => {
-            refresh()
+          submit(resp, () => {
             onClose()
           })
         }}

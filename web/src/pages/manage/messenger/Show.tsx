@@ -1,4 +1,4 @@
-import { Message } from "./Messenger"
+import type { Message } from "~/api/admin/messenger"
 import { Heading, Image } from "@hope-ui/solid"
 
 export const StringShow = (props: Message) => {

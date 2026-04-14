@@ -168,29 +168,17 @@ func localBrowserAccessibleLocalStorages(user *model.User) []LocalBrowserStorage
 }
 
 func LocalBrowserStorages(c *gin.Context) {
-	user := c.MustGet("user").(*model.User)
+	user := localBrowserCurrentUser(c)
 	common.SuccessResp(c, localBrowserAccessibleLocalStorages(user))
 }
 
 func LocalBrowserList(c *gin.Context) {
 	var req LocalBrowserListReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !localBrowserBind(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
-	if req.Path == "" {
-		req.Path = user.BasePath
-	}
-	if req.Page < 1 {
-		req.Page = 1
-	}
-	if req.PerPage <= 0 {
-		req.PerPage = localBrowserDefaultPerPage
-	}
-	if req.PerPage > localBrowserMaxPerPage {
-		req.PerPage = localBrowserMaxPerPage
-	}
+	user := localBrowserCurrentUser(c)
+	normalizeLocalBrowserListReq(user, &req)
 	reqPath, storage, err := resolveLocalBrowserPath(user, req.Path)
 	if err != nil {
 		common.ErrorResp(c, err, 400)
@@ -224,11 +212,10 @@ func LocalBrowserList(c *gin.Context) {
 
 func LocalBrowserUsage(c *gin.Context) {
 	var req LocalBrowserUsageReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !localBrowserBind(c, &req) {
 		return
 	}
-	user := c.MustGet("user").(*model.User)
+	user := localBrowserCurrentUser(c)
 	targetPath := req.Path
 	if strings.TrimSpace(targetPath) == "" {
 		targetPath = user.BasePath
@@ -258,8 +245,7 @@ func LocalBrowserUsage(c *gin.Context) {
 
 func LocalBrowserDirSizes(c *gin.Context) {
 	var req LocalBrowserDirSizesReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !localBrowserBind(c, &req) {
 		return
 	}
 	if len(req.Paths) == 0 {
@@ -270,7 +256,7 @@ func LocalBrowserDirSizes(c *gin.Context) {
 		common.ErrorStrResp(c, "too many paths in one request", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
+	user := localBrowserCurrentUser(c)
 	items := make([]LocalBrowserDirSizeItem, 0, len(req.Paths))
 	seen := map[string]struct{}{}
 	for _, raw := range req.Paths {
@@ -299,15 +285,14 @@ func LocalBrowserDirSizes(c *gin.Context) {
 
 func LocalBrowserCompress(c *gin.Context) {
 	var req LocalBrowserCompressReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !localBrowserBind(c, &req) {
 		return
 	}
 	if len(req.Names) == 0 {
 		common.ErrorStrResp(c, "no files selected", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
+	user := localBrowserCurrentUser(c)
 	if !user.CanWrite() {
 		common.ErrorResp(c, errs.PermissionDenied, 403)
 		return
@@ -394,8 +379,7 @@ func LocalBrowserCompress(c *gin.Context) {
 
 func LocalBrowserExtract(c *gin.Context) {
 	var req LocalBrowserExtractReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !localBrowserBind(c, &req) {
 		return
 	}
 	archivePaths := normalizeLocalBrowserExtractPaths(req.ArchivePath, req.ArchivePaths)
@@ -403,7 +387,7 @@ func LocalBrowserExtract(c *gin.Context) {
 		common.ErrorStrResp(c, "no archives selected", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
+	user := localBrowserCurrentUser(c)
 	if !user.CanWrite() {
 		common.ErrorResp(c, errs.PermissionDenied, 403)
 		return
@@ -559,15 +543,14 @@ func LocalBrowserExtract(c *gin.Context) {
 
 func LocalBrowserRemove(c *gin.Context) {
 	var req LocalBrowserRemoveReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !localBrowserBind(c, &req) {
 		return
 	}
 	if len(req.Paths) == 0 {
 		common.ErrorStrResp(c, "no files selected", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
+	user := localBrowserCurrentUser(c)
 	if !user.CanRemove() {
 		common.ErrorResp(c, errs.PermissionDenied, 403)
 		return
@@ -596,15 +579,14 @@ func LocalBrowserMove(c *gin.Context) {
 
 func localBrowserMoveCopy(c *gin.Context, isMove bool) {
 	var req LocalBrowserMoveCopyReq
-	if err := c.ShouldBind(&req); err != nil {
-		common.ErrorResp(c, err, 400)
+	if !localBrowserBind(c, &req) {
 		return
 	}
 	if len(req.Paths) == 0 {
 		common.ErrorStrResp(c, "no files selected", 400)
 		return
 	}
-	user := c.MustGet("user").(*model.User)
+	user := localBrowserCurrentUser(c)
 	if isMove {
 		if !user.CanMove() {
 			common.ErrorResp(c, errs.PermissionDenied, 403)
@@ -663,19 +645,7 @@ func localBrowserMoveCopy(c *gin.Context, isMove bool) {
 			return
 		}
 	}
-	if groupID != "" && len(addedTasks) > 0 {
-		common.SuccessResp(c, gin.H{
-			"task": buildGroupTaskInfo[task.TaskInfoWithCreator](groupID, addedTasks, "local browser batch"),
-		})
-		return
-	}
-	if len(addedTasks) > 0 {
-		common.SuccessResp(c, gin.H{
-			"tasks": getTaskInfos(addedTasks),
-		})
-		return
-	}
-	common.SuccessResp(c)
+	successTaskResp(c, groupID, addedTasks, "local browser batch")
 }
 
 func shouldSkipLocalBrowserTransfer(srcPath, dstDir string) bool {
@@ -710,6 +680,36 @@ func normalizeLocalBrowserExtractPaths(single string, batch []string) []string {
 		out = append(out, clean)
 	}
 	return out
+}
+
+func localBrowserCurrentUser(c *gin.Context) *model.User {
+	return c.MustGet("user").(*model.User)
+}
+
+func localBrowserBind(c *gin.Context, req any) bool {
+	if err := c.ShouldBind(req); err != nil {
+		common.ErrorResp(c, err, 400)
+		return false
+	}
+	return true
+}
+
+func normalizeLocalBrowserListReq(user *model.User, req *LocalBrowserListReq) {
+	if req == nil {
+		return
+	}
+	if req.Path == "" {
+		req.Path = user.BasePath
+	}
+	if req.Page < 1 {
+		req.Page = 1
+	}
+	if req.PerPage <= 0 {
+		req.PerPage = localBrowserDefaultPerPage
+	}
+	if req.PerPage > localBrowserMaxPerPage {
+		req.PerPage = localBrowserMaxPerPage
+	}
 }
 
 func resolveLocalBrowserPath(user *model.User, rawPath string) (string, driver.Driver, error) {

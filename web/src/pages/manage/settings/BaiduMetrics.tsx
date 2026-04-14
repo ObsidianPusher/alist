@@ -8,39 +8,9 @@ import {
   onMount,
 } from "solid-js"
 import { useFetch, useT } from "~/hooks"
-import { PResp } from "~/types"
-import { handleResp, r } from "~/utils"
-
-type BaiduTransferAggregate = {
-  active_blocks: number
-  total_bytes: number
-  total_blocks: number
-  total_duration_ms: number
-  average_block_ms: number
-  average_throughput_bps: number
-  throughput_1m_bps: number
-  throughput_5m_bps: number
-  max_block_ms: number
-  last_finished_at: number
-}
-
-type BaiduRecentBlock = {
-  direction: "download" | "upload"
-  backend_id: string
-  file: string
-  offset: number
-  size: number
-  duration_ms: number
-  throughput_bps: number
-  finished_at: number
-}
-
-type BaiduMetricsSnapshot = {
-  generated_at: number
-  download: BaiduTransferAggregate
-  upload: BaiduTransferAggregate
-  recent: BaiduRecentBlock[]
-}
+import { BaiduMetricsSnapshot } from "~/types"
+import { handleResp } from "~/utils"
+import { getBaiduMetrics } from "~/api/admin/system"
 
 const formatBytes = (bytes: number) => {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
@@ -83,9 +53,7 @@ const shortenFile = (file: string) => {
 const BaiduMetrics = () => {
   const t = useT()
   const [stats, setStats] = createSignal<BaiduMetricsSnapshot>()
-  const [loading, fetchStats] = useFetch(
-    (): PResp<BaiduMetricsSnapshot> => r.get("/admin/system/baidu_metrics"),
-  )
+  const [loading, fetchStats] = useFetch(getBaiduMetrics)
 
   const refresh = async () => {
     const resp = await fetchStats()

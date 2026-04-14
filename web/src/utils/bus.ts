@@ -5,6 +5,7 @@ type Events = {
   gallery: string
   tool: string
   pathname: string
+  "browser-objs-reset": undefined
 }
 
 export const bus = mitt<Events>()

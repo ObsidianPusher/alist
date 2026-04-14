@@ -29,22 +29,29 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return
-          if (
-            id.includes("artplayer") ||
-            id.includes("hls.js") ||
-            id.includes("flv.js") ||
-            id.includes("libass-wasm")
-          ) {
-            return "player"
+          if (id.includes("@hope-ui") || id.includes("@stitches")) {
+            return "ui-hope"
           }
           if (
-            id.includes("@hope-ui") ||
-            id.includes("@stitches") ||
             id.includes("solid-js") ||
             id.includes("solid-icons") ||
             id.includes("@motionone/solid")
           ) {
-            return "ui"
+            return "ui-solid"
+          }
+          if (
+            id.includes("artplayer")
+          ) {
+            return "player-art"
+          }
+          if (id.includes("hls.js")) {
+            return "player-hls"
+          }
+          if (id.includes("flv.js")) {
+            return "player-flv"
+          }
+          if (id.includes("libass-wasm") || id.includes("artplayer-plugin")) {
+            return "player-extra"
           }
           if (
             id.includes("asciinema-player") ||
@@ -54,15 +61,21 @@ export default defineConfig({
           }
           if (
             id.includes("solid-markdown") ||
+            id.includes("markdown-it") ||
             id.includes("remark-") ||
             id.includes("rehype-") ||
-            id.includes("katex") ||
             id.includes("mark.js")
           ) {
-            return "markdown"
+            return "markdown-core"
           }
-          if (id.includes("@egjs/view360") || id.includes("aplayer")) {
+          if (id.includes("katex")) {
+            return "markdown-katex"
+          }
+          if (id.includes("@egjs/view360")) {
             return "preview-media"
+          }
+          if (id.includes("aplayer")) {
+            return "player-audio"
           }
           if (id.includes("@github/webauthn-json")) {
             return "authn"

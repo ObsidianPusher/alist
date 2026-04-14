@@ -1,10 +1,9 @@
 import { Box, Button, Center, HStack, Text } from "@hope-ui/solid"
 import { Show, createSignal, onCleanup, onMount } from "solid-js"
-import { useRouter, useLink, useFetch } from "~/hooks"
+import { useRouter, useLink, useFetch, useVideoProgress } from "~/hooks"
 import { getSettingBool, local, objStore, password } from "~/store"
-import { ObjType, PResp } from "~/types"
-import { ext, handleResp, notify, r, pathDir, pathJoin, trimBase } from "~/utils"
-import { getVideoProgress, saveVideoProgress } from "~/utils/api"
+import { ObjType } from "~/types"
+import { ext, handleResp, notify, pathDir, pathJoin, trimBase } from "~/utils"
 import Artplayer from "artplayer"
 import { type Option } from "artplayer/types/option"
 import { type Setting } from "artplayer/types/setting"
@@ -17,34 +16,15 @@ import { ArtPlayerIconsSubtitle } from "~/components/icons"
 import { useNavigate } from "@solidjs/router"
 import { TiWarning } from "solid-icons/ti"
 import { createMediaSourceController, parseAutoFullscreen } from "./player_common"
+import {
+  getAliyunVideoPreview,
+  type AliyunVideoPreviewData,
+} from "~/api/fs-other"
 
-export interface Data {
-  drive_id: string
-  file_id: string
-  video_preview_play_info: VideoPreviewPlayInfo
-}
-
-export interface VideoPreviewPlayInfo {
-  category: string
-  live_transcoding_task_list: LiveTranscodingTaskList[]
-  meta: Meta
-}
-
-export interface LiveTranscodingTaskList {
-  stage: string
-  status: string
-  template_height: number
-  template_id: string
-  template_name: string
-  template_width: number
-  url: string
-}
-
-export interface Meta {
-  duration: number
-  height: number
-  width: number
-}
+export type Data = AliyunVideoPreviewData
+export type VideoPreviewPlayInfo = AliyunVideoPreviewData["video_preview_play_info"]
+export type LiveTranscodingTaskList = VideoPreviewPlayInfo["live_transcoding_task_list"][number]
+export type Meta = VideoPreviewPlayInfo["meta"]
 
 const Preview = () => {
   const { pathname, searchParams } = useRouter()
@@ -54,6 +34,11 @@ const Preview = () => {
   let videos = objStore.objs.filter((obj) => obj.type === ObjType.VIDEO)
   if (videos.length === 0) {
     videos = [objStore.obj]
+  }
+  const hasPrev = () => videos.findIndex((f) => f.name === objStore.obj.name) > 0
+  const hasNext = () => {
+    const index = videos.findIndex((f) => f.name === objStore.obj.name)
+    return index >= 0 && index < videos.length - 1
   }
   const next_video = () => {
     const index = videos.findIndex((f) => f.name === objStore.obj.name)
@@ -75,12 +60,31 @@ const Preview = () => {
       )
     }
   }
+  const selectVideo = (name: string) => {
+    const index = videos.findIndex((f) => f.name === name)
+    if (index < 0) return
+    navigate(
+      pathJoin(pathDir(location.pathname), videos[index].name) +
+        "?auto_fullscreen=" +
+        player.fullscreen,
+    )
+  }
   let player: Artplayer
-  const [resumeVisible, setResumeVisible] = createSignal(false)
-  const [resumeAt, setResumeAt] = createSignal(0)
-  const [resumeApplied, setResumeApplied] = createSignal(false)
   const autoResumeEnabled = () => local["video_auto_resume"] === "true"
   const currentPath = () => trimBase(location.pathname)
+  const {
+    resumeVisible,
+    resumeAt,
+    resumeApplied,
+    setResumeApplied,
+    setResumeVisible,
+    loadResume,
+    persistProgress,
+  } = useVideoProgress(() => ({
+    path: currentPath(),
+    size: objStore.obj.size,
+    modTime: Date.parse(objStore.obj.modified) || 0,
+  }))
   let lastReport = 0
   let lastReportedPos = 0
   let option: Option = {
@@ -305,13 +309,8 @@ const Preview = () => {
       }),
     )
   }
-  const [loading, post] = useFetch(
-    (): PResp<Data> =>
-      r.post("/fs/other", {
-        path: pathname(),
-        password: password(),
-        method: "video_preview",
-      }),
+  const [loading, post] = useFetch(() =>
+    getAliyunVideoPreview(pathname(), password()),
   )
   onMount(async () => {
     const resp = await post()
@@ -355,31 +354,22 @@ const Preview = () => {
         }
       })
       player.on("video:ended", () => {
-        void saveVideoProgress({
-          path: currentPath(),
-          size: objStore.obj.size,
-          mod_time: Date.parse(objStore.obj.modified) || 0,
-          position: Number.isFinite(player.duration) ? player.duration : player.currentTime,
-          duration: Number.isFinite(player.duration) ? player.duration : 0,
-        })
+        void persistProgress(
+          Number.isFinite(player.duration) ? player.duration : player.currentTime,
+          Number.isFinite(player.duration) ? player.duration : 0,
+        )
         if (!autoNext()) return
         next_video()
       })
       player.on("video:timeupdate", () => {
-        if (player.paused) return
+        if (!player.playing) return
         const now = player.currentTime || 0
         if (!Number.isFinite(now) || now <= 1) return
         const ts = Date.now()
         if (ts - lastReport < 10000 && Math.abs(now - lastReportedPos) < 5) return
         lastReport = ts
         lastReportedPos = now
-        void saveVideoProgress({
-          path: currentPath(),
-          size: objStore.obj.size,
-          mod_time: Date.parse(objStore.obj.modified) || 0,
-          position: now,
-          duration: Number.isFinite(player.duration) ? player.duration : 0,
-        })
+        void persistProgress(now, Number.isFinite(player.duration) ? player.duration : 0)
       })
       interval = window.setInterval(resetPlayUrl, 1000 * 60 * 14)
     })
@@ -420,20 +410,22 @@ const Preview = () => {
     player?.destroy()
     window.clearInterval(interval)
   })
-  const [autoNext, setAutoNext] = createSignal()
+  const [autoNext, setAutoNext] = createSignal(false)
   const [warnVisible, setWarnVisible] = createSignal(false)
   onMount(() => {
-    void (async () => {
-      const resp = await getVideoProgress(currentPath())
-      if (!resp || resp.code !== 200 || !resp.data) return
-      if (resp.data.finished) return
-      if (!Number.isFinite(resp.data.position) || resp.data.position <= 5) return
-      setResumeAt(resp.data.position)
-      setResumeVisible(true)
-    })()
+    void loadResume()
   })
   return (
-    <VideoBox onAutoNextChange={setAutoNext}>
+    <VideoBox
+      playlist={videos.map((v) => ({ name: v.name }))}
+      current={objStore.obj.name}
+      onSelect={selectVideo}
+      hasPrev={hasPrev()}
+      hasNext={hasNext()}
+      onPrev={previous_video}
+      onNext={next_video}
+      onAutoNextChange={setAutoNext}
+    >
       <Box w="$full" h="60vh" position="relative">
         <Box w="$full" h="$full" id="video-player" />
         {resumeVisible() && (

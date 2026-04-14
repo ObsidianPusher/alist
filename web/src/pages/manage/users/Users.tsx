@@ -20,7 +20,7 @@ import {
   useRouter,
   useT,
 } from "~/hooks"
-import { handleResp, notify, r } from "~/utils"
+import { handleResp, notify } from "~/utils"
 import {
   UserPermissions,
   UserVisiblePermissionIndexes,
@@ -29,6 +29,7 @@ import {
   PPageResp,
   PEmptyResp,
 } from "~/types"
+import { cancelUser2FA, deleteUser as deleteUserApi, listUsers } from "~/api/admin/users"
 import { DeletePopover } from "../common/DeletePopover"
 import { Wether } from "~/components"
 
@@ -69,9 +70,7 @@ const Users = () => {
   const t = useT()
   useManageTitle("manage.sidemenu.users")
   const { to } = useRouter()
-  const [getUsersLoading, getUsers] = useFetch(
-    (): PPageResp<User> => r.get("/admin/user/list"),
-  )
+  const [getUsersLoading, getUsers] = useFetch(listUsers)
   const [users, setUsers] = createSignal<User[]>([])
   const refresh = async () => {
     const resp = await getUsers()
@@ -79,12 +78,8 @@ const Users = () => {
   }
   refresh()
 
-  const [deleting, deleteUser] = useListFetch(
-    (id: number): PEmptyResp => r.post(`/admin/user/delete?id=${id}`),
-  )
-  const [cancel_2faId, cancel_2fa] = useListFetch(
-    (id: number): PEmptyResp => r.post(`/admin/user/cancel_2fa?id=${id}`),
-  )
+  const [deleting, deleteUser] = useListFetch((id: number): PEmptyResp => deleteUserApi(id))
+  const [cancel_2faId, cancel_2fa] = useListFetch((id: number): PEmptyResp => cancelUser2FA(id))
   return (
     <VStack spacing="$2" alignItems="start" w="$full">
       <HStack spacing="$2">

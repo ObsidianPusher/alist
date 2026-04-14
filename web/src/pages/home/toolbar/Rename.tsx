@@ -1,22 +1,17 @@
 import { createDisclosure } from "@hope-ui/solid"
 import { onCleanup, Show } from "solid-js"
 import { ModalInput } from "~/components"
-import { useFetch, usePath, useRouter, useT } from "~/hooks"
+import { useFetch, useFsAction, useRouter, useT } from "~/hooks"
 import { oneChecked, selectedObjs } from "~/store"
-import {
-  bus,
-  fsRename,
-  handleRespWithNotifySuccess,
-  notify,
-  pathJoin,
-} from "~/utils"
+import { bus, notify, pathJoin } from "~/utils"
+import { renameFs } from "~/api/fs-ops"
 
 export const Rename = () => {
   const { isOpen, onOpen, onClose } = createDisclosure()
   const t = useT()
-  const [loading, ok] = useFetch(fsRename)
+  const [loading, ok] = useFetch(renameFs)
   const { pathname } = useRouter()
-  const { refresh } = usePath()
+  const { submit } = useFsAction()
   const handler = (name: string) => {
     if (name === "rename") {
       if (!oneChecked()) {
@@ -44,8 +39,7 @@ export const Rename = () => {
             pathJoin(pathname(), selectedObjs()[0].name),
             name,
           )
-          handleRespWithNotifySuccess(resp, () => {
-            refresh()
+          submit(resp, () => {
             onClose()
           })
         }}

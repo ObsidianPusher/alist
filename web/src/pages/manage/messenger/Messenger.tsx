@@ -4,18 +4,14 @@ import { createStore, produce } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { useFetch, useT } from "~/hooks"
 import { PEmptyResp, PResp } from "~/types"
+import { getMessage, sendMessage } from "~/api/admin/messenger"
 import {
   handleRespWithNotifySuccess,
   handleRespWithoutNotify,
   notify,
-  r,
 } from "~/utils"
 import { StringShow, ImageShow } from "./Show"
-
-export interface Message {
-  type: string
-  content: any
-}
+import type { Message } from "~/api/admin/messenger"
 
 export const Shower: Record<string, Component<Message>> = {
   string: StringShow,
@@ -26,14 +22,9 @@ export const Messenger = () => {
   const t = useT()
   notify.info(t("manage.messenger-tips"))
   const [toSend, setToSend] = createSignal("")
-  const [getLoading, getR] = useFetch(
-    (): PResp<Message> => r.post("/admin/message/get"),
-  )
+  const [getLoading, getR] = useFetch((): PResp<Message> => getMessage())
   const [sendLoading, sendR] = useFetch(
-    (): PEmptyResp =>
-      r.post("/admin/message/send", {
-        message: toSend(),
-      }),
+    (): PEmptyResp => sendMessage(toSend()),
   )
   const [received, setReceived] = createStore<Message[]>([])
   const get = async () => {

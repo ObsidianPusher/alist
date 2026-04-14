@@ -1,7 +1,7 @@
 import { password } from "~/store"
 import { EmptyResp } from "~/types"
-import { r } from "~/utils"
 import { SetUpload, Upload } from "./types"
+import { uploadFsForm } from "~/api/uploads"
 export const FormUpload: Upload = async (
   uploadPath: string,
   file: File,
@@ -13,15 +13,12 @@ export const FormUpload: Upload = async (
   let oldLoaded = 0
   const form = new FormData()
   form.append("file", file)
-  const resp: EmptyResp = await r.put("/fs/form", form, {
-    headers: {
-      "File-Path": encodeURIComponent(uploadPath),
-      "As-Task": asTask,
-      ...(taskGroup ? { "Task-Group": taskGroup } : {}),
-      "Content-Type": "multipart/form-data",
-      "Last-Modified": file.lastModified,
-      Password: password(),
-    },
+  const resp: EmptyResp = await uploadFsForm(form, {
+    uploadPath,
+    asTask,
+    taskGroup,
+    password: password(),
+    lastModified: file.lastModified,
     onUploadProgress: (progressEvent) => {
       if (progressEvent.total) {
         const complete =
