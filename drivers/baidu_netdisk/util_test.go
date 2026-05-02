@@ -77,3 +77,60 @@ func TestBaiduNetdiskApplyDownloadPolicyUsesRolePolicy(t *testing.T) {
 		t.Fatalf("expected background requests to use fixed segment cache")
 	}
 }
+
+func TestCloneManagedObjPreservesConcreteTypeAndMetadata(t *testing.T) {
+	now := time.Unix(1710000000, 0)
+	src := &model.ObjThumb{
+		Object: model.Object{
+			ID:       "123",
+			Path:     "/src/file.txt",
+			Name:     "file.txt",
+			Size:     2048,
+			Modified: now,
+			Ctime:    now.Add(-time.Hour),
+			HashInfo: utils.NewHashInfo(utils.MD5, "abc"),
+		},
+		Thumbnail: model.Thumbnail{Thumbnail: "thumb"},
+	}
+
+	got := cloneManagedObj(src, "/dst/file.txt", "file.txt")
+	obj, ok := got.(*model.ObjThumb)
+	if !ok {
+		t.Fatalf("expected *model.ObjThumb, got %T", got)
+	}
+	if obj.Path != "/dst/file.txt" || obj.Name != "file.txt" {
+		t.Fatalf("unexpected object location: path=%s name=%s", obj.Path, obj.Name)
+	}
+	if obj.Size != src.Size || obj.Ctime != src.Ctime {
+		t.Fatalf("expected metadata to be preserved")
+	}
+	if thumb, ok := model.GetThumb(obj); !ok || thumb != "thumb" {
+		t.Fatalf("expected thumbnail to be preserved")
+	}
+}
+
+func TestCloneManagedObjSupportsPlainObject(t *testing.T) {
+	now := time.Unix(1710000000, 0)
+	src := &model.Object{
+		ID:       "456",
+		Path:     "/src/plain.txt",
+		Name:     "plain.txt",
+		Size:     128,
+		Modified: now,
+		Ctime:    now.Add(-time.Minute),
+		IsFolder: false,
+		HashInfo: utils.NewHashInfo(utils.MD5, "def"),
+	}
+
+	got := cloneManagedObj(src, "/dst/plain.txt", "plain.txt")
+	obj, ok := got.(*model.Object)
+	if !ok {
+		t.Fatalf("expected *model.Object, got %T", got)
+	}
+	if obj.Path != "/dst/plain.txt" || obj.Name != "plain.txt" {
+		t.Fatalf("unexpected cloned object location: path=%s name=%s", obj.Path, obj.Name)
+	}
+	if obj.ID != src.ID || obj.Size != src.Size || obj.Ctime != src.Ctime {
+		t.Fatalf("expected plain object metadata to be preserved")
+	}
+}

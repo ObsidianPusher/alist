@@ -411,6 +411,47 @@ func (d *BaiduNetdisk) MakeDir(ctx context.Context, parentDir model.Obj, dirName
 	return fileToObj(newDir), nil
 }
 
+func cloneManagedObj(obj model.Obj, newPath, newName string) model.Obj {
+	now := time.Now()
+	switch src := model.UnwrapObj(obj).(type) {
+	case *model.ObjThumbURL:
+		cloned := *src
+		cloned.Path = newPath
+		cloned.Name = newName
+		cloned.Modified = now
+		return &cloned
+	case *model.ObjThumb:
+		cloned := *src
+		cloned.Path = newPath
+		cloned.Name = newName
+		cloned.Modified = now
+		return &cloned
+	case *model.ObjectURL:
+		cloned := *src
+		cloned.Path = newPath
+		cloned.Name = newName
+		cloned.Modified = now
+		return &cloned
+	case *model.Object:
+		cloned := *src
+		cloned.Path = newPath
+		cloned.Name = newName
+		cloned.Modified = now
+		return &cloned
+	default:
+		return &model.Object{
+			ID:       obj.GetID(),
+			Path:     newPath,
+			Name:     newName,
+			Size:     obj.GetSize(),
+			Modified: now,
+			Ctime:    obj.CreateTime(),
+			IsFolder: obj.IsDir(),
+			HashInfo: obj.GetHash(),
+		}
+	}
+}
+
 func (d *BaiduNetdisk) Move(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj, error) {
 	data := []base.Json{
 		{
@@ -423,12 +464,7 @@ func (d *BaiduNetdisk) Move(ctx context.Context, srcObj, dstDir model.Obj) (mode
 	if err != nil {
 		return nil, err
 	}
-	if srcObj, ok := srcObj.(*model.ObjThumb); ok {
-		srcObj.SetPath(stdpath.Join(dstDir.GetPath(), srcObj.GetName()))
-		srcObj.Modified = time.Now()
-		return srcObj, nil
-	}
-	return nil, nil
+	return cloneManagedObj(srcObj, stdpath.Join(dstDir.GetPath(), srcObj.GetName()), srcObj.GetName()), nil
 }
 
 func (d *BaiduNetdisk) Rename(ctx context.Context, srcObj model.Obj, newName string) (model.Obj, error) {
@@ -442,17 +478,10 @@ func (d *BaiduNetdisk) Rename(ctx context.Context, srcObj model.Obj, newName str
 	if err != nil {
 		return nil, err
 	}
-
-	if srcObj, ok := srcObj.(*model.ObjThumb); ok {
-		srcObj.SetPath(stdpath.Join(stdpath.Dir(srcObj.GetPath()), newName))
-		srcObj.Name = newName
-		srcObj.Modified = time.Now()
-		return srcObj, nil
-	}
-	return nil, nil
+	return cloneManagedObj(srcObj, stdpath.Join(stdpath.Dir(srcObj.GetPath()), newName), newName), nil
 }
 
-func (d *BaiduNetdisk) Copy(ctx context.Context, srcObj, dstDir model.Obj) error {
+func (d *BaiduNetdisk) Copy(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj, error) {
 	data := []base.Json{
 		{
 			"path":    srcObj.GetPath(),
@@ -461,7 +490,10 @@ func (d *BaiduNetdisk) Copy(ctx context.Context, srcObj, dstDir model.Obj) error
 		},
 	}
 	_, err := d.manage(ctx, "copy", data)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return cloneManagedObj(srcObj, stdpath.Join(dstDir.GetPath(), srcObj.GetName()), srcObj.GetName()), nil
 }
 
 func (d *BaiduNetdisk) Remove(ctx context.Context, obj model.Obj) error {

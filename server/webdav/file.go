@@ -7,9 +7,11 @@ package webdav
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"net/http"
 	"path"
 	"path/filepath"
+	"time"
 
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/driver"
@@ -94,22 +96,89 @@ func cloneObjWithName(obj model.Obj, name string) model.Obj {
 	}
 }
 
-func copyOrMoveWithinStorage(ctx context.Context, storage driver.Driver, srcActualPath, dstActualPath string, move bool, overwrite bool) (int, error) {
+func webdavStatusFromStorageErr(err error) int {
+	switch {
+	case err == nil:
+		return http.StatusCreated
+	case stderrors.Is(err, errDestinationExists):
+		return http.StatusPreconditionFailed
+	case stderrors.Is(err, errs.NotImplement):
+		return http.StatusNotImplemented
+	case errs.IsObjectNotFound(err):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func waitForStorageMutation(ctx context.Context, storage driver.Driver, srcActualPath, dstActualPath string, move bool) error {
+	const (
+		maxAttempts = 8
+		waitStep    = 150 * time.Millisecond
+	)
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		_, dstErr := op.Get(ctx, storage, dstActualPath)
+		if dstErr == nil {
+			if !move {
+				return nil
+			}
+			_, srcErr := op.Get(ctx, storage, srcActualPath)
+			if errs.IsObjectNotFound(srcErr) {
+				return nil
+			}
+			if srcErr != nil {
+				lastErr = srcErr
+			} else {
+				lastErr = fmt.Errorf("source still exists after move: %s", srcActualPath)
+			}
+		} else {
+			lastErr = dstErr
+		}
+		if attempt < maxAttempts-1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(waitStep):
+			}
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("storage mutation verification failed: src=%s dst=%s", srcActualPath, dstActualPath)
+	}
+	return lastErr
+}
+
+func renameWithinStorage(ctx context.Context, storage driver.Driver, srcActualPath, dstName string) error {
+	srcRawObj, err := op.Get(ctx, storage, srcActualPath)
+	if err != nil {
+		return err
+	}
+	srcObj := model.UnwrapObj(srcRawObj)
+	switch s := storage.(type) {
+	case driver.RenameResult:
+		_, err = s.Rename(ctx, srcObj, dstName)
+	case driver.Rename:
+		err = s.Rename(ctx, srcObj, dstName)
+	default:
+		err = errs.NotImplement
+	}
+	return err
+}
+
+func moveOrCopyWithinStorage(ctx context.Context, storage driver.Driver, srcActualPath, dstActualPath string, move bool) error {
 	srcObj, err := op.Get(ctx, storage, srcActualPath)
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return err
 	}
 	dstDirActualPath := path.Dir(dstActualPath)
 	dstName := path.Base(dstActualPath)
-	if err := ensureDestinationInStorage(ctx, storage, dstActualPath, overwrite); err != nil {
-		if stderrors.Is(err, errDestinationExists) {
-			return http.StatusPreconditionFailed, err
-		}
-		return http.StatusInternalServerError, err
-	}
 	dstDirObj, err := op.GetUnwrap(ctx, storage, dstDirActualPath)
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return err
 	}
 	srcObj = cloneObjWithName(model.UnwrapObj(srcObj), dstName)
 	if move {
@@ -131,7 +200,29 @@ func copyOrMoveWithinStorage(ctx context.Context, storage driver.Driver, srcActu
 			err = errs.NotImplement
 		}
 	}
+	return err
+}
+
+func copyOrMoveWithinStorage(ctx context.Context, storage driver.Driver, srcActualPath, dstActualPath string, move bool, overwrite bool) (int, error) {
+	if err := ensureDestinationInStorage(ctx, storage, dstActualPath, overwrite); err != nil {
+		return webdavStatusFromStorageErr(err), err
+	}
+	srcDirActualPath := path.Dir(srcActualPath)
+	dstDirActualPath := path.Dir(dstActualPath)
+	dstName := path.Base(dstActualPath)
+	var err error
+	if move && srcDirActualPath == dstDirActualPath {
+		err = renameWithinStorage(ctx, storage, srcActualPath, dstName)
+		if stderrors.Is(err, errs.NotImplement) {
+			err = moveOrCopyWithinStorage(ctx, storage, srcActualPath, dstActualPath, true)
+		}
+	} else {
+		err = moveOrCopyWithinStorage(ctx, storage, srcActualPath, dstActualPath, move)
+	}
 	if err != nil {
+		return webdavStatusFromStorageErr(err), err
+	}
+	if err = waitForStorageMutation(ctx, storage, srcActualPath, dstActualPath, move); err != nil {
 		return http.StatusInternalServerError, err
 	}
 	return http.StatusCreated, nil
