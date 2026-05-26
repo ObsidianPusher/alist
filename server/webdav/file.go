@@ -152,6 +152,15 @@ func waitForStorageMutation(ctx context.Context, storage driver.Driver, srcActua
 	return lastErr
 }
 
+func clearStorageMutationCache(storage driver.Driver, srcActualPath, dstActualPath string, move bool) {
+	srcParent := path.Dir(srcActualPath)
+	dstParent := path.Dir(dstActualPath)
+	op.ClearCache(storage, dstParent)
+	if move || srcParent != dstParent {
+		op.ClearCache(storage, srcParent)
+	}
+}
+
 func renameWithinStorage(ctx context.Context, storage driver.Driver, srcActualPath, dstName string) error {
 	srcRawObj, err := op.Get(ctx, storage, srcActualPath)
 	if err != nil {
@@ -222,6 +231,7 @@ func copyOrMoveWithinStorage(ctx context.Context, storage driver.Driver, srcActu
 	if err != nil {
 		return webdavStatusFromStorageErr(err), err
 	}
+	clearStorageMutationCache(storage, srcActualPath, dstActualPath, move)
 	if err = waitForStorageMutation(ctx, storage, srcActualPath, dstActualPath, move); err != nil {
 		return http.StatusInternalServerError, err
 	}

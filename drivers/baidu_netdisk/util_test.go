@@ -1,6 +1,7 @@
 package baidu_netdisk
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -75,6 +76,37 @@ func TestBaiduNetdiskApplyDownloadPolicyUsesRolePolicy(t *testing.T) {
 	}
 	if rc.cache == nil || rc.cacheFileKey == "" {
 		t.Fatalf("expected background requests to use fixed segment cache")
+	}
+}
+
+func TestBaiduNetdiskCurrentDownloadRuntimeConfigUsesConfiguredConcurrency(t *testing.T) {
+	d := &BaiduNetdisk{
+		Addition: Addition{
+			DownloadTaskConcurrency: 6,
+			DownloadPartSizeMB:      12,
+		},
+	}
+	cfg := d.currentDownloadRuntimeConfig()
+	if cfg.partConcurrency != defaultDownloadPartConcurrency {
+		t.Fatalf("expected fixed part concurrency %d, got %d", defaultDownloadPartConcurrency, cfg.partConcurrency)
+	}
+	if cfg.partSize != 12*int(utils.MB) {
+		t.Fatalf("expected part size %d, got %d", 12*int(utils.MB), cfg.partSize)
+	}
+}
+
+func TestBaiduNetdiskInitKeepsFixedDownloadPartConcurrency(t *testing.T) {
+	d := &BaiduNetdisk{
+		Addition: Addition{
+			DownloadTaskConcurrency: 6,
+			DownloadPartSizeMB:      12,
+		},
+	}
+	if err := d.Init(context.Background()); err == nil {
+		t.Fatal("expected init to fail without auth, got nil")
+	}
+	if d.downloadPartConcurrency != defaultDownloadPartConcurrency {
+		t.Fatalf("expected fixed part concurrency %d, got %d", defaultDownloadPartConcurrency, d.downloadPartConcurrency)
 	}
 }
 

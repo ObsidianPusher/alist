@@ -4,11 +4,12 @@ import { api, log } from "."
 
 const NETWORK_ERROR_CODE = 500
 const defaultNetworkErrorMessage = "network request failed"
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30000
 type HeaderBag = AxiosResponseHeaders | AxiosHeaders | Record<string, unknown>
 
 const instance = axios.create({
   baseURL: api + "/api",
-  timeout: 30000,
+  timeout: DEFAULT_REQUEST_TIMEOUT_MS,
   headers: {
     "Content-Type": "application/json;charset=utf-8",
     // 'Authorization': localStorage.getItem("admin-token") || "",

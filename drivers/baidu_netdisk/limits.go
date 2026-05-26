@@ -21,7 +21,6 @@ import (
 
 const (
 	// Defaults for Baidu driver.
-	defaultListTaskConcurrency     = 4
 	defaultDownloadTaskConcurrency = 3
 	defaultUploadTaskConcurrency   = 1
 	defaultDownloadPartConcurrency = 1

@@ -15,7 +15,6 @@ type Addition struct {
 	RedirectURI               string `json:"redirect_uri" default:"oob"`
 	AuthCode                  string `json:"auth_code"`
 	AccessToken               string
-	ListTaskConcurrency       int    `json:"list_task_concurrency" type:"number" default:"4" help:"simultaneous directory list tasks, 1<=n<=32"`
 	UploadTaskConcurrency     int    `json:"upload_task_concurrency" type:"number" default:"1" help:"simultaneous upload tasks, 1<=n<=8"`
 	DownloadTaskConcurrency   int    `json:"download_task_concurrency" type:"number" default:"3" help:"simultaneous background download tasks, 1<=n<=16"`
 	DownloadPartSizeMB        int64  `json:"download_part_size_mb" type:"number" default:"8" help:"single task download part size in MB, 1<=n<=64"`

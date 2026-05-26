@@ -11,6 +11,7 @@ type UploadOptions = {
   password?: string
   lastModified?: number
   onUploadProgress?: UploadProgressHandler
+  timeout?: number
 }
 
 const buildUploadHeaders = (
@@ -31,13 +32,18 @@ const buildUploadConfig = (
 ): AxiosRequestConfig => ({
   headers: buildUploadHeaders(options, contentType),
   onUploadProgress: options.onUploadProgress,
+  timeout: options.timeout ?? 0,
 })
 
 export const uploadFsForm = (
   form: FormData,
   options: UploadOptions,
 ): Promise<EmptyResp> => {
-  return r.put("/fs/form", form, buildUploadConfig(options, "multipart/form-data"))
+  return r.put(
+    "/fs/form",
+    form,
+    buildUploadConfig(options, "multipart/form-data"),
+  )
 }
 
 export const uploadFsStream = (

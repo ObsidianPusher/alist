@@ -137,6 +137,75 @@ func (s *webdavNoCopyStorage) Copy(ctx context.Context, srcObj, dstDir model.Obj
 	return nil, errs.NotImplement
 }
 
+type webdavCacheOnlyStorage struct {
+	model.Storage
+	renameCalls int
+	items       map[string]*model.Object
+}
+
+func newWebdavCacheOnlyStorage() *webdavCacheOnlyStorage {
+	root := &model.Object{Path: "/", Name: "root", IsFolder: true}
+	parent := &model.Object{Path: "/dir", Name: "dir", IsFolder: true}
+	src := &model.Object{Path: "/dir/source.txt", Name: "source.txt"}
+	return &webdavCacheOnlyStorage{
+		items: map[string]*model.Object{
+			"/":               root,
+			"/dir":            parent,
+			"/dir/source.txt": src,
+		},
+	}
+}
+
+func (s *webdavCacheOnlyStorage) Config() driver.Config {
+	return driver.Config{Name: "webdav-cache-only"}
+}
+func (s *webdavCacheOnlyStorage) GetAddition() driver.Additional   { return nil }
+func (s *webdavCacheOnlyStorage) Init(ctx context.Context) error   { return nil }
+func (s *webdavCacheOnlyStorage) Drop(ctx context.Context) error   { return nil }
+func (s *webdavCacheOnlyStorage) SetStorage(storage model.Storage) { s.Storage = storage }
+func (s *webdavCacheOnlyStorage) GetStorage() *model.Storage       { return &s.Storage }
+func (s *webdavCacheOnlyStorage) GetRoot(ctx context.Context) (model.Obj, error) {
+	if obj, ok := s.items["/"]; ok {
+		cloned := *obj
+		return &cloned, nil
+	}
+	return nil, os.ErrNotExist
+}
+func (s *webdavCacheOnlyStorage) List(ctx context.Context, dir model.Obj, args model.ListArgs) ([]model.Obj, error) {
+	res := make([]model.Obj, 0)
+	dirPath := dir.GetPath()
+	for p, obj := range s.items {
+		if p == "/" || p == dirPath {
+			continue
+		}
+		if filepath.Dir(p) == dirPath {
+			cloned := *obj
+			res = append(res, &cloned)
+		}
+	}
+	return res, nil
+}
+func (s *webdavCacheOnlyStorage) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
+	return &model.Link{URL: "https://example.invalid/file"}, nil
+}
+func (s *webdavCacheOnlyStorage) Rename(ctx context.Context, srcObj model.Obj, newName string) (model.Obj, error) {
+	s.renameCalls++
+	srcPath := srcObj.GetPath()
+	obj := s.items[srcPath]
+	delete(s.items, srcPath)
+	cloned := *obj
+	cloned.Name = newName
+	cloned.Path = filepath.Join(filepath.Dir(srcPath), newName)
+	s.items[cloned.Path] = &cloned
+	return &cloned, nil
+}
+func (s *webdavCacheOnlyStorage) Move(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj, error) {
+	return nil, errs.NotImplement
+}
+func (s *webdavCacheOnlyStorage) Copy(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj, error) {
+	return nil, errs.NotImplement
+}
+
 var webdavTestOnce sync.Once
 
 func initWebdavTestEnv() {
@@ -293,5 +362,23 @@ func TestCopyOrMoveWithinStorageReturnsNotImplementedForUnsupportedCopy(t *testi
 	}
 	if err == nil {
 		t.Fatalf("expected error for unsupported copy")
+	}
+}
+
+func TestCopyOrMoveWithinStorageClearsCacheBeforeVerification(t *testing.T) {
+	storage := newWebdavCacheOnlyStorage()
+
+	status, err := copyOrMoveWithinStorage(context.Background(), storage, "/dir/source.txt", "/dir/target.txt", true, true)
+	if status != http.StatusCreated || err != nil {
+		t.Fatalf("move within storage with cache-only backend: status=%d err=%v", status, err)
+	}
+	if storage.renameCalls != 1 {
+		t.Fatalf("expected rename to be called once, got %d", storage.renameCalls)
+	}
+	if _, ok := storage.items["/dir/target.txt"]; !ok {
+		t.Fatalf("target file not found after rename")
+	}
+	if _, ok := storage.items["/dir/source.txt"]; ok {
+		t.Fatalf("source file should not exist after rename")
 	}
 }

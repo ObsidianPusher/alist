@@ -98,4 +98,5 @@ func InitTaskManager() {
 			return t.GetFinishedAtUnix()
 		})
 	}
+	registerBaiduTaskManagerRefreshHook()
 }

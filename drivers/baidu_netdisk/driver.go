@@ -44,7 +44,6 @@ type BaiduNetdisk struct {
 	downloadPartConcurrency int
 	downloadPartSize        int
 
-	listLimiter      *tokenLimiter
 	downloadLimiter  *tokenLimiter
 	uploadLimiter    *tokenLimiter
 	proxyCache       *baiduProxyRangeCache
@@ -105,11 +104,6 @@ func (d *BaiduNetdisk) Init(ctx context.Context) error {
 	d.stopTokenKeepAlive()
 	d.closeProxyCache()
 	d.uploadThread = 1
-	listTaskConcurrency := d.ListTaskConcurrency
-	if listTaskConcurrency <= 0 {
-		listTaskConcurrency = defaultListTaskConcurrency
-	}
-	listTaskConcurrency = clampInt(listTaskConcurrency, 1, 32)
 	uploadTaskConcurrency := d.UploadTaskConcurrency
 	if uploadTaskConcurrency <= 0 {
 		uploadTaskConcurrency = defaultUploadTaskConcurrency
@@ -125,7 +119,6 @@ func (d *BaiduNetdisk) Init(ctx context.Context) error {
 	if downloadPartSizeMB <= 0 {
 		downloadPartSizeMB = defaultDownloadPartSizeMB
 	}
-	d.ListTaskConcurrency = listTaskConcurrency
 	d.UploadTaskConcurrency = uploadTaskConcurrency
 	d.DownloadTaskConcurrency = downloadTaskConcurrency
 	d.DownloadPartSizeMB = downloadPartSizeMB
@@ -137,7 +130,6 @@ func (d *BaiduNetdisk) Init(ctx context.Context) error {
 	tokenKeepAliveIntervalMin = clampInt(tokenKeepAliveIntervalMin, 5, 1440)
 	d.TokenKeepaliveIntervalMin = tokenKeepAliveIntervalMin
 
-	d.listLimiter = newTokenLimiter(listTaskConcurrency)
 	d.downloadLimiter = newTokenLimiter(downloadTaskConcurrency)
 	d.uploadLimiter = newTokenLimiter(uploadTaskConcurrency)
 	d.dlinkURLCache = cache.NewMemCache[string](cache.WithShards[string](64))
@@ -229,14 +221,6 @@ func (d *BaiduNetdisk) stopTokenKeepAlive() {
 func (d *BaiduNetdisk) keepAliveByRootList(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if d.listLimiter != nil {
-		waitCtx, cancel := context.WithTimeout(ctx, baiduLimiterWaitTimeout)
-		defer cancel()
-		if err := d.listLimiter.acquireBackground(waitCtx); err != nil {
-			return err
-		}
-		defer d.listLimiter.releaseBackground()
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -363,14 +347,6 @@ func (d *BaiduNetdisk) ensureProxyCache(maxBytes int64) *baiduProxyRangeCache {
 func (d *BaiduNetdisk) List(ctx context.Context, dir model.Obj, args model.ListArgs) ([]model.Obj, error) {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if d.listLimiter != nil {
-		waitCtx, cancel := context.WithTimeout(ctx, baiduLimiterWaitTimeout)
-		defer cancel()
-		if err := d.listLimiter.acquireInteractive(waitCtx); err != nil {
-			return nil, err
-		}
-		defer d.listLimiter.releaseInteractive()
 	}
 	files, err := d.getFiles(ctx, dir.GetPath())
 	if err != nil {
