@@ -89,6 +89,14 @@ const (
 	LdapDefaultDir        = "ldap_default_dir"
 	LdapLoginTips         = "ldap_login_tips"
 
+	// s3
+	S3Endpoint        = "s3_endpoint"
+	S3Region          = "s3_region"
+	S3Port            = "s3_port"
+	S3AccessKeyID     = "s3_access_key_id"
+	S3SecretAccessKey = "s3_secret_access_key"
+	S3Buckets         = "s3_buckets"
+
 	// qbittorrent
 	QbittorrentUrl      = "qbittorrent_url"
 	QbittorrentSeedtime = "qbittorrent_seedtime"

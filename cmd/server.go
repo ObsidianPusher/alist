@@ -17,6 +17,7 @@ import (
 	"github.com/alist-org/alist/v3/cmd/flags"
 	"github.com/alist-org/alist/v3/internal/bootstrap"
 	"github.com/alist-org/alist/v3/internal/conf"
+	"github.com/alist-org/alist/v3/internal/s3server"
 	"github.com/alist-org/alist/v3/pkg/utils"
 	"github.com/alist-org/alist/v3/server"
 	"github.com/gin-gonic/gin"
@@ -53,6 +54,7 @@ the address is defined in config file`,
 		}
 		bootstrap.LoadStorages()
 		bootstrap.InitTaskManager()
+		s3server.Start()
 		if !flags.Debug && !flags.Dev {
 			gin.SetMode(gin.ReleaseMode)
 		}
@@ -163,6 +165,7 @@ the address is defined in config file`,
 			go shutdownServer("Unix", unixSrv)
 		}
 		wg.Wait()
+		s3server.Stop()
 		Release()
 		utils.Log.Println("Server exit")
 	},

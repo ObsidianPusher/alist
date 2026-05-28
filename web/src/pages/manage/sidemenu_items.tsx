@@ -75,6 +75,12 @@ export const side_menu_items: SideMenuItem[] = [
         component: () => <CommonSettings group={Group.LDAP} />,
       },
       {
+        title: "manage.sidemenu.s3",
+        icon: BsCloudUploadFill,
+        to: "/@manage/settings/s3",
+        component: lazy(() => import("./settings/S3")),
+      },
+      {
         title: "manage.sidemenu.other",
         icon: BsMedium,
         to: "/@manage/settings/other",

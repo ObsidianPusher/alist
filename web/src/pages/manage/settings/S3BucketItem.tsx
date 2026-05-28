@@ -25,14 +25,17 @@ export const S3BucketItem = (props: props) => {
       spacing="$2"
     >
       <FormControl w="$full" display="flex" flexDirection="column" required>
-        <FormLabel for="path" display="flex" alignItems="center">
+        <FormLabel for="name" display="flex" alignItems="center">
           {t(`global.name`)}
         </FormLabel>
         <Input
           id="name"
           value={props.name}
-          onChange={(e) =>
-            props.onChange({ ...props, name: e.currentTarget.value })
+          onInput={(e) =>
+            props.onChange({
+              name: e.currentTarget.value,
+              path: props.path,
+            })
           }
         />
       </FormControl>
@@ -44,7 +47,12 @@ export const S3BucketItem = (props: props) => {
         <FolderChooseInput
           id="path"
           value={props.path}
-          onChange={(e) => props.onChange({ ...props, path: e })}
+          onChange={(e) =>
+            props.onChange({
+              name: props.name,
+              path: e,
+            })
+          }
         />
       </FormControl>
 
