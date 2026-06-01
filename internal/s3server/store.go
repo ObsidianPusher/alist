@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alist-org/alist/v3/cmd/flags"
 	"github.com/alist-org/alist/v3/internal/errs"
 	"github.com/alist-org/alist/v3/pkg/utils/random"
 )
@@ -63,8 +64,24 @@ type multipartUpload struct {
 var multipartUploadStore sync.Map
 
 func objectMetaFilePath(bucketRootFullPath, objectPath string) string {
+	return legacyObjectMetaFilePath(bucketRootFullPath, objectPath)
+}
+
+func legacyObjectMetaFilePath(bucketRootFullPath, objectPath string) string {
 	sum := sha256.Sum256([]byte(filepath.Clean(objectPath)))
 	return filepath.Join(bucketRootFullPath, s3MetaDirName, hex.EncodeToString(sum[:])+".json")
+}
+
+func s3MetaStoreDir() string {
+	if strings.TrimSpace(flags.DataDir) == "" {
+		return filepath.Join(".", s3MetaDirName)
+	}
+	return filepath.Join(flags.DataDir, "s3-meta")
+}
+
+func objectMetaStoreFilePath(objectPath string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(objectPath)))
+	return filepath.Join(s3MetaStoreDir(), hex.EncodeToString(sum[:])+".json")
 }
 
 func contentTypeForName(name, fallback string) string {
@@ -78,7 +95,10 @@ func contentTypeForName(name, fallback string) string {
 }
 
 func loadStoredObjectMetadata(bucketRootFullPath, objectPath, objectName, contentTypeHint string) (storedObjectMetadata, bool) {
-	b, err := os.ReadFile(objectMetaFilePath(bucketRootFullPath, objectPath))
+	b, err := os.ReadFile(objectMetaStoreFilePath(objectPath))
+	if err != nil {
+		b, err = os.ReadFile(legacyObjectMetaFilePath(bucketRootFullPath, objectPath))
+	}
 	if err != nil {
 		return storedObjectMetadata{}, false
 	}
@@ -99,7 +119,7 @@ func saveStoredObjectMetadata(bucketRootFullPath string, meta storedObjectMetada
 	if meta.BackendPath == "" {
 		return fmt.Errorf("missing backend path")
 	}
-	metaFile := objectMetaFilePath(bucketRootFullPath, meta.BackendPath)
+	metaFile := objectMetaStoreFilePath(meta.BackendPath)
 	if err := os.MkdirAll(filepath.Dir(metaFile), 0o755); err != nil {
 		return err
 	}
@@ -136,8 +156,69 @@ func saveStoredObjectMetadata(bucketRootFullPath string, meta storedObjectMetada
 
 func deleteStoredObjectMetadata(bucketRootFullPath, objectPath string) error {
 	objectMetaCache.Delete(objectPath)
-	if err := os.Remove(objectMetaFilePath(bucketRootFullPath, objectPath)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(objectMetaStoreFilePath(objectPath)); err != nil && !os.IsNotExist(err) {
 		return err
+	}
+	if err := os.Remove(legacyObjectMetaFilePath(bucketRootFullPath, objectPath)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func cleanupStoredObjectMetadata(cfg *Config) error {
+	if err := cleanupOrphanObjectMetadataFiles(); err != nil {
+		return err
+	}
+	return cleanupLegacyObjectMetadata(cfg)
+}
+
+func cleanupOrphanObjectMetadataFiles() error {
+	dir := s3MetaStoreDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		metaFile := filepath.Join(dir, entry.Name())
+		b, err := os.ReadFile(metaFile)
+		if err != nil {
+			_ = os.Remove(metaFile)
+			continue
+		}
+		var meta storedObjectMetadata
+		if err := json.Unmarshal(b, &meta); err != nil || strings.TrimSpace(meta.BackendPath) == "" {
+			_ = os.Remove(metaFile)
+			continue
+		}
+		if _, err := os.Stat(meta.BackendPath); err != nil {
+			if os.IsNotExist(err) {
+				_ = os.Remove(metaFile)
+				continue
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func cleanupLegacyObjectMetadata(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, bucket := range cfg.Buckets {
+		root := strings.TrimSpace(bucket.localRootPath)
+		if root == "" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, s3MetaDirName)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return nil
 }

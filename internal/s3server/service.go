@@ -15,6 +15,7 @@ import (
 
 const (
 	refreshInterval          = 2 * time.Second
+	cleanupInterval          = 30 * time.Minute
 	gracefulShutdownTimeout  = 10 * time.Second
 	defaultListenBindAddress = "0.0.0.0"
 )
@@ -55,6 +56,12 @@ func (s *service) start() {
 	utils.GoSafe("s3-server-watch", func() {
 		s.watch(stopCh)
 	})
+	utils.GoSafe("s3-server-cleanup", func() {
+		s.watchCleanup(stopCh)
+	})
+	utils.GoSafe("s3-server-cleanup-once", func() {
+		s.cleanup()
+	})
 
 	s.refresh()
 }
@@ -69,6 +76,33 @@ func (s *service) watch(stopCh <-chan struct{}) {
 		case <-stopCh:
 			return
 		}
+	}
+}
+
+func (s *service) watchCleanup(stopCh <-chan struct{}) {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.cleanup()
+		case <-stopCh:
+			return
+		}
+	}
+}
+
+func (s *service) cleanup() {
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Errorf("[s3] cleanup load config failed: %+v", err)
+		return
+	}
+	if !cfg.enabled() {
+		return
+	}
+	if err := cleanupStoredObjectMetadata(cfg); err != nil {
+		log.Errorf("[s3] cleanup metadata failed: %+v", err)
 	}
 }
 

@@ -868,6 +868,12 @@ func listBucketObjects(rootPath string) ([]resolvedObject, error) {
 		if err != nil {
 			return err
 		}
+		if rel == ".alist-s3-meta" || strings.HasPrefix(rel, ".alist-s3-meta"+string(filepath.Separator)) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		objects = append(objects, resolvedObject{
 			key:      filepath.ToSlash(rel),
 			fullPath: currentPath,
