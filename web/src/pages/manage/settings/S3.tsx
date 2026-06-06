@@ -29,6 +29,14 @@ import { listSettingsByGroup, saveSettings as saveSettingsApi } from "~/api/admi
 import { S3BucketItem, type S3Bucket } from "./S3BucketItem"
 
 type S3SettingMap = Record<string, string>
+type S3SettingKey =
+  | "s3_endpoint"
+  | "s3_region"
+  | "s3_port"
+  | "s3_access_key_id"
+  | "s3_secret_access_key"
+  | "s3_buckets"
+type S3SettingsState = Partial<Record<S3SettingKey, string>> & S3SettingMap
 
 const S3_PROTOCOLS = ["http", "https"] as const
 const CREDENTIAL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -103,7 +111,7 @@ const S3Settings = () => {
   const [settingsLoading, getSettings] = useFetch(
     (): PResp<SettingItem[]> => listSettingsByGroup(Group.S3),
   )
-  const [settings, setSettings] = createSignal<S3SettingMap>({})
+  const [settings, setSettings] = createSignal<S3SettingsState>({})
   const [protocol, setProtocol] = createSignal<"http" | "https">("http")
   const [endpointHost, setEndpointHost] = createSignal("")
   const [buckets, setBuckets] = createSignal<S3Bucket[]>([])
@@ -111,7 +119,7 @@ const S3Settings = () => {
   const refresh = async () => {
     const resp = await getSettings()
     handleResp(resp, (data) => {
-      const map: S3SettingMap = {}
+      const map: S3SettingsState = {}
       for (const item of data) {
         map[item.key] = item.value
       }
@@ -130,7 +138,7 @@ const S3Settings = () => {
   }
 
   const currentBuckets = createMemo(() => buckets())
-  const buildSavePayload = (overrides?: Partial<S3SettingMap>) => {
+  const buildSavePayload = (overrides?: Partial<S3SettingsState>) => {
     const next = {
       ...settings(),
       ...overrides,

@@ -248,6 +248,7 @@ func (t *CopyTask) markFinished() {
 	t.UpdatedAt = now
 	t.FinishedAt = now
 	t.Persist()
+	task.TriggerDoneTaskCleanup()
 }
 
 func (t *CopyTask) GetFinishedAtUnix() int64 {

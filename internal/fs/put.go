@@ -157,6 +157,7 @@ func (t *UploadTask) markFinished() {
 	t.UpdatedAt = now
 	t.FinishedAt = now
 	t.Persist()
+	task.TriggerDoneTaskCleanup()
 }
 
 func (t *UploadTask) GetFinishedAtUnix() int64 {

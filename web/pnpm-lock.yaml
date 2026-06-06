@@ -16,7 +16,10 @@ importers:
         version: 2.1.1
       '@hope-ui/solid':
         specifier: 0.6.7
-        version: 0.6.7(@stitches/core@1.2.8)(solid-js@1.4.8)(solid-transition-group@0.0.12)
+        version: 0.6.7(@stitches/core@1.2.8)(solid-js@1.4.8)(solid-transition-group@0.0.12(solid-js@1.4.8))
+      '@idle-observer/core':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@monaco-editor/loader':
         specifier: ^1.4.0
         version: 1.4.0(monaco-editor@0.50.0)
@@ -103,7 +106,7 @@ importers:
         version: 0.2.0
       solid-contextmenu:
         specifier: 0.0.2
-        version: 0.0.2(solid-js@1.4.8)(solid-transition-group@0.0.12)
+        version: 0.0.2(solid-js@1.4.8)(solid-transition-group@0.0.12(solid-js@1.4.8))
       solid-icons:
         specifier: ^1.0.1
         version: 1.0.1(solid-js@1.4.8)
@@ -143,7 +146,7 @@ importers:
         version: 2.0.1
       '@vitejs/plugin-legacy':
         specifier: ^2.0.1
-        version: 2.0.1(terser@5.14.2)(vite@3.0.8)
+        version: 2.0.1(terser@5.14.2)(vite@3.0.8(terser@5.14.2))
       husky:
         specifier: ^8.0.2
         version: 8.0.2
@@ -170,7 +173,7 @@ importers:
         version: 0.4.4
       vite-plugin-solid:
         specifier: ^2.3.0
-        version: 2.3.0(solid-js@1.4.8)(vite@3.0.8)
+        version: 2.3.0(solid-js@1.4.8)(vite@3.0.8(terser@5.14.2))
 
 packages:
 
@@ -368,6 +371,9 @@ packages:
 
   '@hrgui/libass-wasm-ts@1.0.3':
     resolution: {integrity: sha512-n8RbJLrhirfgDun88jVSs0/SeLC5PZz9iost9DXZ9dAXztDzpmjlEfu+k/viM37+EbaC9gWnRdUwcnptDkjtNw==}
+
+  '@idle-observer/core@0.2.0':
+    resolution: {integrity: sha512-mr8dedtzGUGMo38oP4+gDGq/oGjY0f9aCddsCcOm5XZTDE5ALSL3zyvXT8+eOjMrwOVLkDXt4BoC7A9U6ImANw==}
 
   '@jridgewell/gen-mapping@0.1.1':
     resolution: {integrity: sha512-sQXCasFk+U8lWYEe66WxRDOE9PjVz4vSM51fTu3Hw+ClTpUSQb718772vH3pyS5pShp6lvQM7SxgIDXXXmOX7w==}
@@ -2189,7 +2195,7 @@ snapshots:
 
   '@github/webauthn-json@2.1.1': {}
 
-  '@hope-ui/solid@0.6.7(@stitches/core@1.2.8)(solid-js@1.4.8)(solid-transition-group@0.0.12)':
+  '@hope-ui/solid@0.6.7(@stitches/core@1.2.8)(solid-js@1.4.8)(solid-transition-group@0.0.12(solid-js@1.4.8))':
     dependencies:
       '@floating-ui/dom': 0.4.4
       '@stitches/core': 1.2.8
@@ -2201,6 +2207,8 @@ snapshots:
       solid-transition-group: 0.0.12(solid-js@1.4.8)
 
   '@hrgui/libass-wasm-ts@1.0.3': {}
+
+  '@idle-observer/core@0.2.0': {}
 
   '@jridgewell/gen-mapping@0.1.1':
     dependencies:
@@ -2386,7 +2394,7 @@ snapshots:
 
   '@viselect/vanilla@3.5.0': {}
 
-  '@vitejs/plugin-legacy@2.0.1(terser@5.14.2)(vite@3.0.8)':
+  '@vitejs/plugin-legacy@2.0.1(terser@5.14.2)(vite@3.0.8(terser@5.14.2))':
     dependencies:
       '@babel/standalone': 7.18.12
       core-js: 3.24.1
@@ -3658,7 +3666,7 @@ snapshots:
 
   smoothscroll@0.4.0: {}
 
-  solid-contextmenu@0.0.2(solid-js@1.4.8)(solid-transition-group@0.0.12):
+  solid-contextmenu@0.0.2(solid-js@1.4.8)(solid-transition-group@0.0.12(solid-js@1.4.8)):
     dependencies:
       clsx: 1.2.1
       mitt: 3.0.0
@@ -3879,7 +3887,7 @@ snapshots:
     dependencies:
       node-html-parser: 5.4.1
 
-  vite-plugin-solid@2.3.0(solid-js@1.4.8)(vite@3.0.8):
+  vite-plugin-solid@2.3.0(solid-js@1.4.8)(vite@3.0.8(terser@5.14.2)):
     dependencies:
       '@babel/core': 7.18.10
       '@babel/preset-typescript': 7.18.6(@babel/core@7.18.10)
@@ -3897,9 +3905,9 @@ snapshots:
       postcss: 8.4.16
       resolve: 1.22.1
       rollup: 2.77.3
-      terser: 5.14.2
     optionalDependencies:
       fsevents: 2.3.3
+      terser: 5.14.2
 
   web-namespaces@2.0.1: {}
 

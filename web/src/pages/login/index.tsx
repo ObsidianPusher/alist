@@ -38,6 +38,16 @@ import {
   CredentialRequestOptionsJSON,
 } from "@github/webauthn-json/browser-ponyfill"
 
+const resolveRedirectTarget = (redirect: string | undefined) => {
+  if (!redirect) return base_path || "/"
+  try {
+    const decoded = decodeURIComponent(redirect)
+    return decoded.startsWith("/") ? decoded : base_path || "/"
+  } catch {
+    return base_path || "/"
+  }
+}
+
 const Login = () => {
   const logos = getSetting("logo").split("\n")
   const logo = useColorModeValue(logos[0], logos.pop())
@@ -118,10 +128,7 @@ const Login = () => {
         (data) => {
           notify.success(t("login.success"))
           changeToken(data.token)
-          to(
-            decodeURIComponent(searchParams.redirect || base_path || "/"),
-            true,
-          )
+          to(resolveRedirectTarget(searchParams.redirect), true)
         },
         (msg, code) => {
           if (!needOpt() && code === 402) {
@@ -155,10 +162,7 @@ const Login = () => {
           handleRespWithoutNotify(resp, (data) => {
             notify.success(t("login.success"))
             changeToken(data.token)
-            to(
-              decodeURIComponent(searchParams.redirect || base_path || "/"),
-              true,
-            )
+            to(resolveRedirectTarget(searchParams.redirect), true)
           })
         } catch (error: unknown) {
           if (error instanceof Error) notify.error(error.message)

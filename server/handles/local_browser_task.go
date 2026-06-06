@@ -87,6 +87,7 @@ func (t *localBrowserExtractTask) markFinished() {
 	t.UpdatedAt = now
 	t.FinishedAt = now
 	t.Persist()
+	task.TriggerDoneTaskCleanup()
 }
 
 func (t *localBrowserExtractTask) GetFinishedAtUnix() int64 {

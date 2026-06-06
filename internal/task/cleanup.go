@@ -2,6 +2,7 @@ package task
 
 import (
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/alist-org/alist/v3/pkg/utils"
@@ -19,6 +20,13 @@ const (
 	defaultDoneTaskCleanupInterval = 5 * time.Minute
 	defaultDoneTaskRetention       = 6 * time.Hour
 	defaultDoneTaskMaxCount        = 2000
+)
+
+var (
+	doneTaskCleanupMu        sync.Mutex
+	doneTaskCleanupCallbacks []func()
+	doneTaskCleanupOnce      sync.Once
+	doneTaskCleanupCh        = make(chan struct{}, 1)
 )
 
 func normalizeDoneTaskCleanupConfig(cfg DoneTaskCleanupConfig) DoneTaskCleanupConfig {
@@ -95,12 +103,58 @@ func cleanupDoneTasks[T tache.Task](manager *tache.Manager[T], cfg DoneTaskClean
 	}
 }
 
+func registerDoneTaskCleanup(callback func()) {
+	if callback == nil {
+		return
+	}
+	doneTaskCleanupMu.Lock()
+	doneTaskCleanupCallbacks = append(doneTaskCleanupCallbacks, callback)
+	doneTaskCleanupMu.Unlock()
+}
+
+func TriggerDoneTaskCleanup() {
+	doneTaskCleanupOnce.Do(func() {
+		utils.GoSafe("task_cleanup_dispatch", func() {
+			for range doneTaskCleanupCh {
+				runDoneTaskCleanupCallbacks()
+				drainDoneTaskCleanupSignal()
+			}
+		})
+	})
+	select {
+	case doneTaskCleanupCh <- struct{}{}:
+	default:
+	}
+}
+
+func drainDoneTaskCleanupSignal() {
+	for {
+		select {
+		case <-doneTaskCleanupCh:
+		default:
+			return
+		}
+	}
+}
+
+func runDoneTaskCleanupCallbacks() {
+	doneTaskCleanupMu.Lock()
+	callbacks := append([]func(){}, doneTaskCleanupCallbacks...)
+	doneTaskCleanupMu.Unlock()
+	for _, callback := range callbacks {
+		callback()
+	}
+}
+
 func StartDoneTaskCleanup[T tache.Task](manager *tache.Manager[T], cfg DoneTaskCleanupConfig, finishedAtUnix func(T) int64) {
 	if manager == nil || finishedAtUnix == nil {
 		return
 	}
 	cfg = normalizeDoneTaskCleanupConfig(cfg)
 
+	registerDoneTaskCleanup(func() {
+		cleanupDoneTasks(manager, cfg, finishedAtUnix)
+	})
 	cleanupDoneTasks(manager, cfg, finishedAtUnix)
 	utils.GoSafe("task_cleanup_"+cfg.Name, func() {
 		ticker := time.NewTicker(cfg.Interval)

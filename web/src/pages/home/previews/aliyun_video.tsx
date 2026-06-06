@@ -1,5 +1,5 @@
 import { Box, Button, Center, HStack, Text } from "@hope-ui/solid"
-import { Show, createSignal, onCleanup, onMount } from "solid-js"
+import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { useRouter, useLink, useFetch, useVideoProgress } from "~/hooks"
 import { getSettingBool, local, objStore, password } from "~/store"
 import { ObjType } from "~/types"
@@ -15,15 +15,20 @@ import { AutoHeightPlugin, VideoBox } from "./video_box"
 import { ArtPlayerIconsSubtitle } from "~/components/icons"
 import { useNavigate } from "@solidjs/router"
 import { TiWarning } from "solid-icons/ti"
-import { createMediaSourceController, parseAutoFullscreen } from "./player_common"
+import {
+  createMediaSourceController,
+  parseAutoFullscreen,
+} from "./player_common"
 import {
   getAliyunVideoPreview,
   type AliyunVideoPreviewData,
 } from "~/api/fs-other"
 
 export type Data = AliyunVideoPreviewData
-export type VideoPreviewPlayInfo = AliyunVideoPreviewData["video_preview_play_info"]
-export type LiveTranscodingTaskList = VideoPreviewPlayInfo["live_transcoding_task_list"][number]
+export type VideoPreviewPlayInfo =
+  AliyunVideoPreviewData["video_preview_play_info"]
+export type LiveTranscodingTaskList =
+  VideoPreviewPlayInfo["live_transcoding_task_list"][number]
 export type Meta = VideoPreviewPlayInfo["meta"]
 
 const Preview = () => {
@@ -35,31 +40,6 @@ const Preview = () => {
   if (videos.length === 0) {
     videos = [objStore.obj]
   }
-  const hasPrev = () => videos.findIndex((f) => f.name === objStore.obj.name) > 0
-  const hasNext = () => {
-    const index = videos.findIndex((f) => f.name === objStore.obj.name)
-    return index >= 0 && index < videos.length - 1
-  }
-  const next_video = () => {
-    const index = videos.findIndex((f) => f.name === objStore.obj.name)
-    if (index < videos.length - 1) {
-      navigate(
-        pathJoin(pathDir(location.pathname), videos[index + 1].name) +
-          "?auto_fullscreen=" +
-          player.fullscreen,
-      )
-    }
-  }
-  const previous_video = () => {
-    const index = videos.findIndex((f) => f.name === objStore.obj.name)
-    if (index > 0) {
-      navigate(
-        pathJoin(pathDir(location.pathname), videos[index - 1].name) +
-          "?auto_fullscreen=" +
-          player.fullscreen,
-      )
-    }
-  }
   const selectVideo = (name: string) => {
     const index = videos.findIndex((f) => f.name === name)
     if (index < 0) return
@@ -68,6 +48,16 @@ const Preview = () => {
         "?auto_fullscreen=" +
         player.fullscreen,
     )
+  }
+  const nextVideo = () => {
+    const index = videos.findIndex((f) => f.name === objStore.obj.name)
+    if (index < videos.length - 1) {
+      navigate(
+        pathJoin(pathDir(location.pathname), videos[index + 1].name) +
+          "?auto_fullscreen=" +
+          player.fullscreen,
+      )
+    }
   }
   let player: Artplayer
   const autoResumeEnabled = () => local["video_auto_resume"] === "true"
@@ -95,28 +85,7 @@ const Preview = () => {
     autoplay: getSettingBool("video_autoplay"),
     autoSize: false,
     autoMini: true,
-    controls: [
-      {
-        name: "previous-button",
-        index: 10,
-        position: "left",
-        html: '<svg fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg" height="22" width="22" class="icon icon-tabler icon-tabler-player-track-prev-filled" width="1em" height="1em" viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" style="overflow: visible; color: currentcolor;"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M20.341 4.247l-8 7a1 1 0 0 0 0 1.506l8 7c.647 .565 1.659 .106 1.659 -.753v-14c0 -.86 -1.012 -1.318 -1.659 -.753z" stroke-width="0" fill="currentColor"></path><path d="M9.341 4.247l-8 7a1 1 0 0 0 0 1.506l8 7c.647 .565 1.659 .106 1.659 -.753v-14c0 -.86 -1.012 -1.318 -1.659 -.753z" stroke-width="0" fill="currentColor"></path></svg>',
-        tooltip: "Previous",
-        click: function () {
-          previous_video()
-        },
-      },
-      {
-        name: "next-button",
-        index: 11,
-        position: "left",
-        html: '<svg fill="none" stroke-width="2" xmlns="http://www.w3.org/2000/svg" height="22" width="22" class="icon icon-tabler icon-tabler-player-track-next-filled" width="1em" height="1em" viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" style="overflow: visible; color: currentcolor;"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M2 5v14c0 .86 1.012 1.318 1.659 .753l8 -7a1 1 0 0 0 0 -1.506l-8 -7c-.647 -.565 -1.659 -.106 -1.659 .753z" stroke-width="0" fill="currentColor"></path><path d="M13 5v14c0 .86 1.012 1.318 1.659 .753l8 -7a1 1 0 0 0 0 -1.506l-8 -7c-.647 -.565 -1.659 -.106 -1.659 .753z" stroke-width="0" fill="currentColor"></path></svg>',
-        tooltip: "Next",
-        click: function () {
-          next_video()
-        },
-      },
-    ],
+    controls: [],
     loop: false,
     flip: true,
     playbackRate: true,
@@ -155,31 +124,41 @@ const Preview = () => {
     airplay: true,
   }
 
-  const subtitle = objStore.related.filter((obj) => {
-    for (const ext of [".srt", ".ass", ".vtt"]) {
-      if (obj.name.endsWith(ext)) {
-        return true
+  // related 是异步更新的，必须保持响应式，否则初次渲染时为空数组会导致字幕永远不挂载
+  const subtitle = createMemo(() =>
+    objStore.related.filter((obj) => {
+      const name = obj.name.toLowerCase()
+      for (const ext of [".srt", ".ass", ".vtt"]) {
+        if (name.endsWith(ext)) {
+          return true
+        }
       }
-    }
-    return false
-  })
-  const danmu = objStore.related.find((obj) => {
-    for (const ext of [".xml"]) {
-      if (obj.name.endsWith(ext)) {
-        return true
+      return false
+    }),
+  )
+  const danmu = createMemo(() =>
+    objStore.related.find((obj) => {
+      const name = obj.name.toLowerCase()
+      for (const ext of [".xml"]) {
+        if (name.endsWith(ext)) {
+          return true
+        }
       }
-    }
-    return false
-  })
+      return false
+    }),
+  )
 
   // TODO: add a switch in manage panel to choose whether to enable `libass-wasm`
   const enableEnhanceAss = true
 
-  if (subtitle.length != 0) {
+  const subtitleList = subtitle()
+  const danmuObj = danmu()
+
+  if (subtitleList.length != 0) {
     let isEnhanceAssMode = false
 
     // set default subtitle
-    const defaultSubtitle = subtitle[0]
+    const defaultSubtitle = subtitleList[0]
     if (enableEnhanceAss && ext(defaultSubtitle.name).toLowerCase() === "ass") {
       isEnhanceAssMode = true
       option.plugins?.push(
@@ -216,7 +195,7 @@ const Preview = () => {
         },
       },
     ]
-    subtitle.forEach((item, i) => {
+    subtitleList.forEach((item, i) => {
       innerMenu.push({
         default: i === 0,
         html: (
@@ -288,10 +267,10 @@ const Preview = () => {
     }
   }
 
-  if (danmu) {
+  if (danmuObj) {
     option.plugins?.push(
       artplayerPluginDanmuku({
-        danmuku: proxyLink(danmu, true),
+        danmuku: proxyLink(danmuObj, true),
         speed: 5,
         opacity: 1,
         fontSize: 25,
@@ -333,7 +312,9 @@ const Preview = () => {
         }
       })
       player = new Artplayer(option)
-      const auto_fullscreen = parseAutoFullscreen(searchParams["auto_fullscreen"])
+      const auto_fullscreen = parseAutoFullscreen(
+        searchParams["auto_fullscreen"],
+      )
       player.on("ready", () => {
         player.fullscreen = auto_fullscreen
       })
@@ -342,7 +323,11 @@ const Preview = () => {
         const position = resumeAt()
         if (!Number.isFinite(position) || position <= 5) return
         const duration = player.duration || 0
-        if (Number.isFinite(duration) && duration > 0 && position >= duration - 3) {
+        if (
+          Number.isFinite(duration) &&
+          duration > 0 &&
+          position >= duration - 3
+        ) {
           return
         }
         if (autoResumeEnabled()) {
@@ -355,21 +340,27 @@ const Preview = () => {
       })
       player.on("video:ended", () => {
         void persistProgress(
-          Number.isFinite(player.duration) ? player.duration : player.currentTime,
+          Number.isFinite(player.duration)
+            ? player.duration
+            : player.currentTime,
           Number.isFinite(player.duration) ? player.duration : 0,
         )
         if (!autoNext()) return
-        next_video()
+        nextVideo()
       })
       player.on("video:timeupdate", () => {
         if (!player.playing) return
         const now = player.currentTime || 0
         if (!Number.isFinite(now) || now <= 1) return
         const ts = Date.now()
-        if (ts - lastReport < 10000 && Math.abs(now - lastReportedPos) < 5) return
+        if (ts - lastReport < 10000 && Math.abs(now - lastReportedPos) < 5)
+          return
         lastReport = ts
         lastReportedPos = now
-        void persistProgress(now, Number.isFinite(player.duration) ? player.duration : 0)
+        void persistProgress(
+          now,
+          Number.isFinite(player.duration) ? player.duration : 0,
+        )
       })
       interval = window.setInterval(resetPlayUrl, 1000 * 60 * 14)
     })
@@ -420,10 +411,6 @@ const Preview = () => {
       playlist={videos.map((v) => ({ name: v.name }))}
       current={objStore.obj.name}
       onSelect={selectVideo}
-      hasPrev={hasPrev()}
-      hasNext={hasNext()}
-      onPrev={previous_video}
-      onNext={next_video}
       onAutoNextChange={setAutoNext}
     >
       <Box w="$full" h="60vh" position="relative">

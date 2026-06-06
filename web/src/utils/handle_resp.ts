@@ -1,24 +1,34 @@
 import { Resp } from "~/types"
 import { bus, notify } from "."
 
+type HandleRespOptions = {
+  auth?: boolean
+  notifyError?: boolean
+  notifySuccess?: boolean
+}
+
 const redirectToLogin = () => {
-  bus.emit("to", `/@login?redirect=${encodeURIComponent(location.pathname)}`)
+  const redirect = `${location.pathname}${location.search}${location.hash}`
+  bus.emit("to", `/@login?redirect=${encodeURIComponent(redirect)}`)
 }
 
 export const handleResp = <T>(
   resp: Resp<T>,
   success?: (data: T) => void,
   fail?: (message: string, code: number) => void,
-  auth: boolean = true,
-  notify_error: boolean = true,
-  notify_success?: boolean,
+  options: HandleRespOptions = {},
 ) => {
+  const {
+    auth = true,
+    notifyError = true,
+    notifySuccess = false,
+  } = options
   if (resp.code === 200) {
-    notify_success && notify.success(resp.message)
+    notifySuccess && notify.success(resp.message)
     success?.(resp.data)
     return true
   } else {
-    notify_error && notify.error(resp.message)
+    notifyError && notify.error(resp.message)
     if (auth && resp.code === 401) {
       redirectToLogin()
       return false
@@ -32,9 +42,12 @@ export const handleRespWithoutAuth = <T>(
   resp: Resp<T>,
   success?: (data: T) => void,
   fail?: (message: string, code?: number) => void,
-  notify_error: boolean = true,
+  notifyError: boolean = true,
 ) => {
-  return handleResp(resp, success, fail, false, notify_error)
+  return handleResp(resp, success, fail as ((message: string, code: number) => void) | undefined, {
+    auth: false,
+    notifyError,
+  })
 }
 
 export const handleRespWithoutNotify = <T>(
@@ -43,7 +56,10 @@ export const handleRespWithoutNotify = <T>(
   fail?: (message: string, code?: number) => void,
   auth: boolean = true,
 ) => {
-  return handleResp(resp, success, fail, auth, false)
+  return handleResp(resp, success, fail as ((message: string, code: number) => void) | undefined, {
+    auth,
+    notifyError: false,
+  })
 }
 
 export const handleRespWithoutAuthAndNotify = <T>(
@@ -51,7 +67,10 @@ export const handleRespWithoutAuthAndNotify = <T>(
   success?: (data: T) => void,
   fail?: (message: string, code?: number) => void,
 ) => {
-  return handleResp(resp, success, fail, false, false)
+  return handleResp(resp, success, fail as ((message: string, code: number) => void) | undefined, {
+    auth: false,
+    notifyError: false,
+  })
 }
 
 export const handleRespWithNotifySuccess = <T>(
@@ -59,7 +78,11 @@ export const handleRespWithNotifySuccess = <T>(
   success?: (data: T) => void,
   fail?: (message: string, code?: number) => void,
   auth: boolean = true,
-  notify_error: boolean = true,
+  notifyError: boolean = true,
 ) => {
-  return handleResp(resp, success, fail, auth, notify_error, true)
+  return handleResp(resp, success, fail as ((message: string, code: number) => void) | undefined, {
+    auth,
+    notifyError,
+    notifySuccess: true,
+  })
 }

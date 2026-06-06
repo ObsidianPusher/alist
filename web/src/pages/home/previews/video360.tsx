@@ -37,19 +37,16 @@ const Preview = () => {
   let viewer: View360 | undefined
   let videoEl: HTMLVideoElement | undefined
 
+  const currentPathKey = createMemo(() =>
+    currentObj().name,
+  )
   const videos = createMemo(() => {
     const list = objs().filter((obj) => obj.type === ObjType.VIDEO)
     if (list.length === 0) return [currentObj()]
-    return [...list].sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { numeric: true }),
-    )
+    return list
   })
   const currentIndex = createMemo(() =>
-    videos().findIndex((f) => f.name === currentObj().name),
-  )
-  const hasPrev = createMemo(() => currentIndex() > 0)
-  const hasNext = createMemo(
-    () => currentIndex() >= 0 && currentIndex() < videos().length - 1,
+    videos().findIndex((f) => f.name === currentPathKey()),
   )
   const gotoIndex = (idx: number) => {
     if (idx < 0 || idx >= videos().length) return
@@ -57,7 +54,6 @@ const Preview = () => {
     navigate(pathJoin(pathDir(location.pathname), target.name))
   }
   const nextVideo = () => gotoIndex(currentIndex() + 1)
-  const previousVideo = () => gotoIndex(currentIndex() - 1)
   const selectVideo = (name: string) => {
     const idx = videos().findIndex((f) => f.name === name)
     gotoIndex(idx)
@@ -135,13 +131,11 @@ const Preview = () => {
 
   return (
     <VideoBox
-      playlist={videos().map((v) => ({ name: v.name }))}
+      playlist={videos().map((v) => ({
+        name: v.name,
+      }))}
       current={currentObj().name}
       onSelect={selectVideo}
-      hasPrev={hasPrev()}
-      hasNext={hasNext()}
-      onPrev={previousVideo}
-      onNext={nextVideo}
       onAutoNextChange={setAutoNext}
     >
       <Show when={err()}>
