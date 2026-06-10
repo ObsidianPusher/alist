@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/alist-org/alist/v3/internal/driver"
@@ -24,6 +26,8 @@ type baiduDirection uint8
 const (
 	baiduDownload baiduDirection = iota
 	baiduUpload
+	defaultTaskListLimit = 100
+	maxTaskListLimit     = 500
 )
 
 type TaskInfo struct {
@@ -41,6 +45,11 @@ type TaskInfo struct {
 	TotalBytes  int64       `json:"total_bytes,omitempty"`
 	DoneBytes   int64       `json:"done_bytes,omitempty"`
 	SubTasks    []TaskInfo  `json:"sub_tasks,omitempty"`
+}
+
+type taskUserScope struct {
+	isAdmin bool
+	uid     uint
 }
 
 type cryptAddition struct {
@@ -248,6 +257,47 @@ func filterTaskInfosByStates(infos []TaskInfo, states ...tache.State) []TaskInfo
 		}
 	}
 	return res
+}
+
+func taskInfoSortScore(info TaskInfo) float64 {
+	if info.IsGroup {
+		score := 0.0
+		for _, sub := range info.SubTasks {
+			if current := taskInfoSortScore(sub); current > score {
+				score = current
+			}
+		}
+		return score
+	}
+	return info.Progress
+}
+
+func sortAndLimitTaskInfos(c *gin.Context, infos []TaskInfo) []TaskInfo {
+	sort.SliceStable(infos, func(i, j int) bool {
+		si := taskInfoSortScore(infos[i])
+		sj := taskInfoSortScore(infos[j])
+		if si == sj {
+			return infos[i].ID > infos[j].ID
+		}
+		return si > sj
+	})
+	limit := defaultTaskListLimit
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			switch {
+			case parsed <= 0:
+				limit = defaultTaskListLimit
+			case parsed > maxTaskListLimit:
+				limit = maxTaskListLimit
+			default:
+				limit = parsed
+			}
+		}
+	}
+	if len(infos) > limit {
+		return infos[:limit]
+	}
+	return infos
 }
 
 func isTaskTerminalState(state tache.State) bool {
@@ -614,6 +664,73 @@ func getUserInfo(c *gin.Context) (bool, uint, bool) {
 	}
 }
 
+func requireTaskUserScope(c *gin.Context) (taskUserScope, bool) {
+	isAdmin, uid, ok := getUserInfo(c)
+	if !ok {
+		common.ErrorStrResp(c, "user invalid", 401)
+		return taskUserScope{}, false
+	}
+	return taskUserScope{isAdmin: isAdmin, uid: uid}, true
+}
+
+func requireTaskScopeAndID(c *gin.Context) (taskUserScope, string, bool) {
+	scope, ok := requireTaskUserScope(c)
+	if !ok {
+		return taskUserScope{}, "", false
+	}
+	tid, ok := requireTaskID(c)
+	if !ok {
+		return taskUserScope{}, "", false
+	}
+	return scope, tid, true
+}
+
+func respondTaskList(c *gin.Context, infos []TaskInfo, states ...tache.State) {
+	common.SuccessResp(c, sortAndLimitTaskInfos(c, filterTaskInfosByStates(infos, states...)))
+}
+
+func respondMergedTaskInfo(c *gin.Context, groupLabel string, infos ...TaskInfo) bool {
+	available := make([]TaskInfo, 0, len(infos))
+	for _, info := range infos {
+		if info.ID != "" {
+			available = append(available, info)
+		}
+	}
+	switch len(available) {
+	case 0:
+		return false
+	case 1:
+		common.SuccessResp(c, available[0])
+		return true
+	default:
+		merged := mergeGroupedTaskInfos(available, groupLabel)
+		if len(merged) == 0 {
+			return false
+		}
+		common.SuccessResp(c, merged[0])
+		return true
+	}
+}
+
+func applyCombinedTaskAction(c *gin.Context, actions ...func(taskUserScope, string) bool) bool {
+	scope, tid, ok := requireTaskScopeAndID(c)
+	if !ok {
+		return false
+	}
+	applied := false
+	for _, action := range actions {
+		if action != nil && action(scope, tid) {
+			applied = true
+		}
+	}
+	if !applied {
+		common.ErrorStrResp(c, "task not found", 404)
+		return false
+	}
+	common.SuccessResp(c)
+	return true
+}
+
 func taskOwnedByUser[T task.TaskInfoWithCreator](t T, isAdmin bool, uid uint) bool {
 	if isAdmin {
 		return true
@@ -624,10 +741,8 @@ func taskOwnedByUser[T task.TaskInfoWithCreator](t T, isAdmin bool, uid uint) bo
 
 func getTargetedHandler[T task.TaskInfoWithCreator](manager *tache.Manager[T], callback func(c *gin.Context, task T)) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			// if there is no bug, here is unreachable
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		t, ok := manager.GetByID(c.Query("tid"))
@@ -635,7 +750,7 @@ func getTargetedHandler[T task.TaskInfoWithCreator](manager *tache.Manager[T], c
 			common.ErrorStrResp(c, "task not found", 404)
 			return
 		}
-		if !taskOwnedByUser(t, isAdmin, uid) {
+		if !taskOwnedByUser(t, scope.isAdmin, scope.uid) {
 			// to avoid an attacker using error messages to guess valid TID, return a 404 rather than a 403
 			common.ErrorStrResp(c, "task not found", 404)
 			return
@@ -646,30 +761,26 @@ func getTargetedHandler[T task.TaskInfoWithCreator](manager *tache.Manager[T], c
 
 func taskRoute[T task.TaskInfoWithCreator](g *gin.RouterGroup, manager *tache.Manager[T]) {
 	g.GET("/undone", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			// if there is no bug, here is unreachable
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
-		common.SuccessResp(c, getTaskInfos(manager.GetByCondition(func(task T) bool {
+		common.SuccessResp(c, sortAndLimitTaskInfos(c, getTaskInfos(manager.GetByCondition(func(task T) bool {
 			// avoid directly passing the user object into the function to reduce closure size
-			return taskOwnedByUser(task, isAdmin, uid) &&
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) &&
 				argsContains(task.GetState(), tache.StatePending, tache.StateRunning, tache.StateCanceling,
 					tache.StateErrored, tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry)
-		})))
+		}))))
 	})
 	g.GET("/done", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			// if there is no bug, here is unreachable
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
-		common.SuccessResp(c, getTaskInfos(manager.GetByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid) &&
+		common.SuccessResp(c, sortAndLimitTaskInfos(c, getTaskInfos(manager.GetByCondition(func(task T) bool {
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) &&
 				argsContains(task.GetState(), tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
-		})))
+		}))))
 	})
 	g.POST("/info", getTargetedHandler(manager, func(c *gin.Context, task T) {
 		common.SuccessResp(c, getTaskInfo(task))
@@ -706,39 +817,33 @@ func taskRoute[T task.TaskInfoWithCreator](g *gin.RouterGroup, manager *tache.Ma
 		common.SuccessResp(c)
 	}))
 	g.POST("/clear_done", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			// if there is no bug, here is unreachable
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		manager.RemoveByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid) &&
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) &&
 				argsContains(task.GetState(), tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 		})
 		common.SuccessResp(c)
 	})
 	g.POST("/clear_succeeded", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			// if there is no bug, here is unreachable
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		manager.RemoveByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && task.GetState() == tache.StateSucceeded
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateSucceeded
 		})
 		common.SuccessResp(c)
 	})
 	g.POST("/retry_failed", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			// if there is no bug, here is unreachable
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		tasks := manager.GetByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && task.GetState() == tache.StateFailed
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateFailed
 		})
 		for _, t := range tasks {
 			prepareTaskForRetry(t)
@@ -749,88 +854,59 @@ func taskRoute[T task.TaskInfoWithCreator](g *gin.RouterGroup, manager *tache.Ma
 }
 
 func taskRouteGrouped[T task.TaskInfoWithCreator](g *gin.RouterGroup, manager *tache.Manager[T], groupLabel string, beforeRetry func(T)) {
-	filterUserTasks := func(isAdmin bool, uid uint) []T {
+	filterUserTasks := func(scope taskUserScope) []T {
 		return manager.GetByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid)
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid)
 		})
 	}
 	g.GET("/undone", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
-		tasks := filterUserTasks(isAdmin, uid)
+		tasks := filterUserTasks(scope)
 		grouped := groupTaskInfos(tasks, groupLabel)
-		common.SuccessResp(c, filterTaskInfosByStates(grouped,
+		respondTaskList(c, grouped,
 			tache.StatePending, tache.StateRunning, tache.StateCanceling, tache.StateErrored,
-			tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry))
+			tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry)
 	})
 	g.GET("/done", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
-		tasks := filterUserTasks(isAdmin, uid)
+		tasks := filterUserTasks(scope)
 		grouped := groupTaskInfos(tasks, groupLabel)
-		common.SuccessResp(c, filterTaskInfosByStates(grouped, tache.StateCanceled, tache.StateFailed, tache.StateSucceeded))
+		respondTaskList(c, grouped, tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 	})
 	g.POST("/info", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		tid, ok := requireTaskID(c)
 		if !ok {
 			return
 		}
-		if t, ok := manager.GetByID(tid); ok {
-			if !taskOwnedByUser(t, isAdmin, uid) {
-				common.ErrorStrResp(c, "task not found", 404)
-				return
-			}
-			common.SuccessResp(c, getTaskInfo(t))
-			return
-		}
-		groupTasks := manager.GetByCondition(func(task T) bool {
-			return task.GetGroupID() == tid && taskOwnedByUser(task, isAdmin, uid)
-		})
-		if len(groupTasks) == 0 {
+		info, found := getTaskInfoForManager(manager, tid, scope.isAdmin, scope.uid, groupLabel)
+		if !found {
 			common.ErrorStrResp(c, "task not found", 404)
 			return
 		}
-		common.SuccessResp(c, buildGroupTaskInfo(tid, groupTasks, groupLabel))
+		common.SuccessResp(c, info)
 	})
 	groupHandler := func(c *gin.Context, action func(task T)) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		tid, ok := requireTaskID(c)
 		if !ok {
 			return
 		}
-		if t, ok := manager.GetByID(tid); ok {
-			if !taskOwnedByUser(t, isAdmin, uid) {
-				common.ErrorStrResp(c, "task not found", 404)
-				return
-			}
-			action(t)
-			common.SuccessResp(c)
-			return
-		}
-		groupTasks := manager.GetByCondition(func(task T) bool {
-			return task.GetGroupID() == tid && taskOwnedByUser(task, isAdmin, uid)
-		})
-		if len(groupTasks) == 0 {
+		if !applyActionForManager(manager, tid, scope.isAdmin, scope.uid, action) {
 			common.ErrorStrResp(c, "task not found", 404)
 			return
-		}
-		for _, t := range groupTasks {
-			action(t)
 		}
 		common.SuccessResp(c)
 	}
@@ -876,36 +952,33 @@ func taskRouteGrouped[T task.TaskInfoWithCreator](g *gin.RouterGroup, manager *t
 		})
 	})
 	g.POST("/clear_done", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		manager.RemoveByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid) &&
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) &&
 				argsContains(task.GetState(), tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 		})
 		common.SuccessResp(c)
 	})
 	g.POST("/clear_succeeded", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		manager.RemoveByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && task.GetState() == tache.StateSucceeded
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateSucceeded
 		})
 		common.SuccessResp(c)
 	})
 	g.POST("/retry_failed", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		tasks := manager.GetByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && task.GetState() == tache.StateFailed
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateFailed
 		})
 		for _, t := range tasks {
 			if beforeRetry != nil {
@@ -957,47 +1030,47 @@ func hasBaiduGroupTarget[T task.TaskInfoWithCreator](tid string, manager *tache.
 
 func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTask], groupLabel string) {
 	extractManager := localBrowserExtractTaskManager()
-	filterCopyTasks := func(isAdmin bool, uid uint, cache map[string]bool) []*fs.CopyTask {
+	filterCopyTasks := func(scope taskUserScope, cache map[string]bool) []*fs.CopyTask {
 		return manager.GetByCondition(func(task *fs.CopyTask) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && !isCopyTaskBaidu(task, cache)
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && !isCopyTaskBaidu(task, cache)
 		})
 	}
-	filterExtractTasks := func(isAdmin bool, uid uint) []*localBrowserExtractTask {
+	filterExtractTasks := func(scope taskUserScope) []*localBrowserExtractTask {
 		return extractManager.GetByCondition(func(task *localBrowserExtractTask) bool {
-			return taskOwnedByUser(task, isAdmin, uid)
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid)
 		})
 	}
-	getCopyTaskInfo := func(tid string, isAdmin bool, uid uint, cache map[string]bool) (TaskInfo, bool) {
+	getCopyTaskInfo := func(tid string, scope taskUserScope, cache map[string]bool) (TaskInfo, bool) {
 		if strings.TrimSpace(tid) == "" {
 			return TaskInfo{}, false
 		}
 		if t, ok := manager.GetByID(tid); ok {
-			if !taskOwnedByUser(t, isAdmin, uid) || isCopyTaskBaidu(t, cache) {
+			if !taskOwnedByUser(t, scope.isAdmin, scope.uid) || isCopyTaskBaidu(t, cache) {
 				return TaskInfo{}, false
 			}
 			return getTaskInfo(t), true
 		}
 		groupTasks := manager.GetByCondition(func(task *fs.CopyTask) bool {
-			return task.GetGroupID() == tid && taskOwnedByUser(task, isAdmin, uid) && !isCopyTaskBaidu(task, cache)
+			return task.GetGroupID() == tid && taskOwnedByUser(task, scope.isAdmin, scope.uid) && !isCopyTaskBaidu(task, cache)
 		})
 		if len(groupTasks) == 0 {
 			return TaskInfo{}, false
 		}
 		return buildGroupTaskInfo(tid, groupTasks, groupLabel), true
 	}
-	applyCopyAction := func(tid string, isAdmin bool, uid uint, cache map[string]bool, action func(task *fs.CopyTask)) bool {
+	applyCopyAction := func(tid string, scope taskUserScope, cache map[string]bool, action func(task *fs.CopyTask)) bool {
 		if strings.TrimSpace(tid) == "" {
 			return false
 		}
 		if t, ok := manager.GetByID(tid); ok {
-			if !taskOwnedByUser(t, isAdmin, uid) || isCopyTaskBaidu(t, cache) {
+			if !taskOwnedByUser(t, scope.isAdmin, scope.uid) || isCopyTaskBaidu(t, cache) {
 				return false
 			}
 			action(t)
 			return true
 		}
 		groupTasks := manager.GetByCondition(func(task *fs.CopyTask) bool {
-			return task.GetGroupID() == tid && taskOwnedByUser(task, isAdmin, uid) && !isCopyTaskBaidu(task, cache)
+			return task.GetGroupID() == tid && taskOwnedByUser(task, scope.isAdmin, scope.uid) && !isCopyTaskBaidu(task, cache)
 		})
 		if len(groupTasks) == 0 {
 			return false
@@ -1008,209 +1081,183 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 		return true
 	}
 	g.GET("/undone", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		cache := map[string]bool{}
-		copyInfos := groupTaskInfos(filterCopyTasks(isAdmin, uid, cache), groupLabel)
-		extractInfos := groupTaskInfos(filterExtractTasks(isAdmin, uid), groupLabel)
+		copyInfos := groupTaskInfos(filterCopyTasks(scope, cache), groupLabel)
+		extractInfos := groupTaskInfos(filterExtractTasks(scope), groupLabel)
 		merged := mergeGroupedTaskInfos(append(copyInfos, extractInfos...), groupLabel)
-		common.SuccessResp(c, filterTaskInfosByStates(merged,
+		respondTaskList(c, merged,
 			tache.StatePending, tache.StateRunning, tache.StateCanceling, tache.StateErrored,
-			tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry))
+			tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry)
 	})
 	g.GET("/done", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		cache := map[string]bool{}
-		copyInfos := groupTaskInfos(filterCopyTasks(isAdmin, uid, cache), groupLabel)
-		extractInfos := groupTaskInfos(filterExtractTasks(isAdmin, uid), groupLabel)
+		copyInfos := groupTaskInfos(filterCopyTasks(scope, cache), groupLabel)
+		extractInfos := groupTaskInfos(filterExtractTasks(scope), groupLabel)
 		merged := mergeGroupedTaskInfos(append(copyInfos, extractInfos...), groupLabel)
-		common.SuccessResp(c, filterTaskInfosByStates(merged, tache.StateCanceled, tache.StateFailed, tache.StateSucceeded))
+		respondTaskList(c, merged, tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 	})
 	g.POST("/info", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
-		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
-			return
-		}
-		tid, ok := requireTaskID(c)
+		scope, tid, ok := requireTaskScopeAndID(c)
 		if !ok {
 			return
 		}
 		cache := map[string]bool{}
-		copyInfo, hasCopy := getCopyTaskInfo(tid, isAdmin, uid, cache)
-		extractInfo, hasExtract := getTaskInfoForManager(extractManager, tid, isAdmin, uid, groupLabel)
-		if hasCopy && hasExtract {
-			merged := mergeGroupedTaskInfos([]TaskInfo{copyInfo, extractInfo}, groupLabel)
-			if len(merged) > 0 {
-				common.SuccessResp(c, merged[0])
-				return
-			}
-		}
-		if hasCopy {
-			common.SuccessResp(c, copyInfo)
-			return
-		}
-		if hasExtract {
-			common.SuccessResp(c, extractInfo)
+		copyInfo, _ := getCopyTaskInfo(tid, scope, cache)
+		extractInfo, _ := getTaskInfoForManager(extractManager, tid, scope.isAdmin, scope.uid, groupLabel)
+		if respondMergedTaskInfo(c, groupLabel, copyInfo, extractInfo) {
 			return
 		}
 		common.ErrorStrResp(c, "task not found", 404)
 	})
-	combinedHandler := func(c *gin.Context, copyAction func(task *fs.CopyTask), extractAction func(task *localBrowserExtractTask)) {
-		isAdmin, uid, ok := getUserInfo(c)
-		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
-			return
-		}
-		tid, ok := requireTaskID(c)
-		if !ok {
-			return
-		}
-		applied := false
-		cache := map[string]bool{}
-		if applyCopyAction(tid, isAdmin, uid, cache, copyAction) {
-			applied = true
-		}
-		if applyActionForManager(extractManager, tid, isAdmin, uid, extractAction) {
-			applied = true
-		}
-		if !applied {
-			common.ErrorStrResp(c, "task not found", 404)
-			return
-		}
-		common.SuccessResp(c)
-	}
 	g.POST("/cancel", func(c *gin.Context) {
-		combinedHandler(
-			c,
-			func(t *fs.CopyTask) {
-				if canTaskBeCanceled(t.GetState()) {
-					manager.Cancel(t.GetID())
-				}
+		applyCombinedTaskAction(c,
+			func(scope taskUserScope, tid string) bool {
+				cache := map[string]bool{}
+				return applyCopyAction(tid, scope, cache, func(t *fs.CopyTask) {
+					if canTaskBeCanceled(t.GetState()) {
+						manager.Cancel(t.GetID())
+					}
+				})
 			},
-			func(t *localBrowserExtractTask) {
-				if canTaskBeCanceled(t.GetState()) {
-					extractManager.Cancel(t.GetID())
-				}
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(extractManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserExtractTask) {
+					if canTaskBeCanceled(t.GetState()) {
+						extractManager.Cancel(t.GetID())
+					}
+				})
 			},
 		)
 	})
 	g.POST("/pause", func(c *gin.Context) {
-		combinedHandler(
-			c,
-			func(t *fs.CopyTask) {
-				if canTaskBeCanceled(t.GetState()) {
-					manager.Cancel(t.GetID())
-				}
+		applyCombinedTaskAction(c,
+			func(scope taskUserScope, tid string) bool {
+				cache := map[string]bool{}
+				return applyCopyAction(tid, scope, cache, func(t *fs.CopyTask) {
+					if canTaskBeCanceled(t.GetState()) {
+						manager.Cancel(t.GetID())
+					}
+				})
 			},
-			func(t *localBrowserExtractTask) {
-				if canTaskBeCanceled(t.GetState()) {
-					extractManager.Cancel(t.GetID())
-				}
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(extractManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserExtractTask) {
+					if canTaskBeCanceled(t.GetState()) {
+						extractManager.Cancel(t.GetID())
+					}
+				})
 			},
 		)
 	})
 	g.POST("/delete", func(c *gin.Context) {
-		combinedHandler(
-			c,
-			func(t *fs.CopyTask) {
-				manager.Remove(t.GetID())
+		applyCombinedTaskAction(c,
+			func(scope taskUserScope, tid string) bool {
+				cache := map[string]bool{}
+				return applyCopyAction(tid, scope, cache, func(t *fs.CopyTask) {
+					manager.Remove(t.GetID())
+				})
 			},
-			func(t *localBrowserExtractTask) {
-				extractManager.Remove(t.GetID())
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(extractManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserExtractTask) {
+					extractManager.Remove(t.GetID())
+				})
 			},
 		)
 	})
 	g.POST("/retry", func(c *gin.Context) {
-		combinedHandler(
-			c,
-			func(t *fs.CopyTask) {
-				if canTaskBeRetried(t.GetState()) {
-					prepareTaskForRetry(t)
-					manager.Retry(t.GetID())
-				}
+		applyCombinedTaskAction(c,
+			func(scope taskUserScope, tid string) bool {
+				cache := map[string]bool{}
+				return applyCopyAction(tid, scope, cache, func(t *fs.CopyTask) {
+					if canTaskBeRetried(t.GetState()) {
+						prepareTaskForRetry(t)
+						manager.Retry(t.GetID())
+					}
+				})
 			},
-			func(t *localBrowserExtractTask) {
-				if canTaskBeRetried(t.GetState()) {
-					prepareTaskForRetry(t)
-					extractManager.Retry(t.GetID())
-				}
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(extractManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserExtractTask) {
+					if canTaskBeRetried(t.GetState()) {
+						prepareTaskForRetry(t)
+						extractManager.Retry(t.GetID())
+					}
+				})
 			},
 		)
 	})
 	g.POST("/resume", func(c *gin.Context) {
-		combinedHandler(
-			c,
-			func(t *fs.CopyTask) {
-				if canTaskBeRetried(t.GetState()) {
-					prepareTaskForRetry(t)
-					manager.Retry(t.GetID())
-				}
+		applyCombinedTaskAction(c,
+			func(scope taskUserScope, tid string) bool {
+				cache := map[string]bool{}
+				return applyCopyAction(tid, scope, cache, func(t *fs.CopyTask) {
+					if canTaskBeRetried(t.GetState()) {
+						prepareTaskForRetry(t)
+						manager.Retry(t.GetID())
+					}
+				})
 			},
-			func(t *localBrowserExtractTask) {
-				if canTaskBeRetried(t.GetState()) {
-					prepareTaskForRetry(t)
-					extractManager.Retry(t.GetID())
-				}
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(extractManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserExtractTask) {
+					if canTaskBeRetried(t.GetState()) {
+						prepareTaskForRetry(t)
+						extractManager.Retry(t.GetID())
+					}
+				})
 			},
 		)
 	})
 	g.POST("/clear_done", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		cache := map[string]bool{}
 		manager.RemoveByCondition(func(task *fs.CopyTask) bool {
-			return taskOwnedByUser(task, isAdmin, uid) &&
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) &&
 				!isCopyTaskBaidu(task, cache) &&
 				argsContains(task.GetState(), tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 		})
 		extractManager.RemoveByCondition(func(task *localBrowserExtractTask) bool {
-			return taskOwnedByUser(task, isAdmin, uid) &&
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) &&
 				argsContains(task.GetState(), tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 		})
 		common.SuccessResp(c)
 	})
 	g.POST("/clear_succeeded", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		cache := map[string]bool{}
 		manager.RemoveByCondition(func(task *fs.CopyTask) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && !isCopyTaskBaidu(task, cache) && task.GetState() == tache.StateSucceeded
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && !isCopyTaskBaidu(task, cache) && task.GetState() == tache.StateSucceeded
 		})
 		extractManager.RemoveByCondition(func(task *localBrowserExtractTask) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && task.GetState() == tache.StateSucceeded
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateSucceeded
 		})
 		common.SuccessResp(c)
 	})
 	g.POST("/retry_failed", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		cache := map[string]bool{}
 		tasks := manager.GetByCondition(func(task *fs.CopyTask) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && !isCopyTaskBaidu(task, cache) && task.GetState() == tache.StateFailed
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && !isCopyTaskBaidu(task, cache) && task.GetState() == tache.StateFailed
 		})
 		for _, t := range tasks {
 			prepareTaskForRetry(t)
 			manager.Retry(t.GetID())
 		}
 		extractTasks := extractManager.GetByCondition(func(task *localBrowserExtractTask) bool {
-			return taskOwnedByUser(task, isAdmin, uid) && task.GetState() == tache.StateFailed
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateFailed
 		})
 		for _, t := range extractTasks {
 			prepareTaskForRetry(t)
@@ -1221,161 +1268,130 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 }
 
 func taskRouteBaiduCombined[T task.TaskInfoWithCreator](g *gin.RouterGroup, manager *tache.Manager[T], direction baiduDirection, groupLabel string) {
-	filterBaseTasks := func(isAdmin bool, uid uint) []T {
+	filterBaseTasks := func(scope taskUserScope) []T {
 		if manager == nil {
 			return nil
 		}
 		return manager.GetByCondition(func(task T) bool {
-			return taskOwnedByUser(task, isAdmin, uid)
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid)
 		})
 	}
+
+	getMergedBaiduTaskInfo := func(tid string, scope taskUserScope, cache map[string]bool) (TaskInfo, bool) {
+		baseInfo, _ := getTaskInfoForManager(manager, tid, scope.isAdmin, scope.uid, groupLabel)
+		copyInfo, _ := getBaiduCopyTaskInfo(tid, scope.isAdmin, scope.uid, direction, cache, groupLabel)
+		available := make([]TaskInfo, 0, 2)
+		if baseInfo.ID != "" {
+			available = append(available, baseInfo)
+		}
+		if copyInfo.ID != "" {
+			available = append(available, copyInfo)
+		}
+		if len(available) == 0 {
+			return TaskInfo{}, false
+		}
+		if len(available) == 1 {
+			return available[0], true
+		}
+		merged := mergeGroupedTaskInfos(available, groupLabel)
+		if len(merged) == 0 {
+			return TaskInfo{}, false
+		}
+		return merged[0], true
+	}
+
+	applyBaiduCombinedAction := func(scope taskUserScope, tid string, action func(baseTask T), copyAction func(copyManager *tache.Manager[*fs.CopyTask], copyTask *fs.CopyTask), cache map[string]bool) bool {
+		applied := false
+		if applyActionForManager(manager, tid, scope.isAdmin, scope.uid, action) {
+			applied = true
+		}
+		if applyActionForBaiduCopy(tid, scope.isAdmin, scope.uid, direction, cache, copyAction) {
+			applied = true
+		}
+		return applied
+	}
 	g.GET("/undone", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		cache := map[string]bool{}
-		baseInfos := groupTaskInfos(filterBaseTasks(isAdmin, uid), groupLabel)
-		copyInfos := groupTaskInfos(collectBaiduCopyTasks(isAdmin, uid, direction, cache), groupLabel)
+		baseInfos := groupTaskInfos(filterBaseTasks(scope), groupLabel)
+		copyInfos := groupTaskInfos(collectBaiduCopyTasks(scope.isAdmin, scope.uid, direction, cache), groupLabel)
 		merged := mergeGroupedTaskInfos(append(baseInfos, copyInfos...), groupLabel)
-		common.SuccessResp(c, filterTaskInfosByStates(merged,
+		respondTaskList(c, merged,
 			tache.StatePending, tache.StateRunning, tache.StateCanceling, tache.StateErrored,
-			tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry))
+			tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry)
 	})
 	g.GET("/done", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
+		scope, ok := requireTaskUserScope(c)
 		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
 			return
 		}
 		cache := map[string]bool{}
-		baseInfos := groupTaskInfos(filterBaseTasks(isAdmin, uid), groupLabel)
-		copyInfos := groupTaskInfos(collectBaiduCopyTasks(isAdmin, uid, direction, cache), groupLabel)
+		baseInfos := groupTaskInfos(filterBaseTasks(scope), groupLabel)
+		copyInfos := groupTaskInfos(collectBaiduCopyTasks(scope.isAdmin, scope.uid, direction, cache), groupLabel)
 		merged := mergeGroupedTaskInfos(append(baseInfos, copyInfos...), groupLabel)
-		common.SuccessResp(c, filterTaskInfosByStates(merged, tache.StateCanceled, tache.StateFailed, tache.StateSucceeded))
+		respondTaskList(c, merged, tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 	})
 	g.POST("/info", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
-		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
-			return
-		}
-		tid, ok := requireTaskID(c)
+		scope, tid, ok := requireTaskScopeAndID(c)
 		if !ok {
 			return
 		}
 		cache := map[string]bool{}
-		baseInfo, hasBase := getTaskInfoForManager(manager, tid, isAdmin, uid, groupLabel)
-		copyInfo, hasCopy := getBaiduCopyTaskInfo(tid, isAdmin, uid, direction, cache, groupLabel)
-		if hasBase && hasCopy {
-			merged := mergeGroupedTaskInfos([]TaskInfo{baseInfo, copyInfo}, groupLabel)
-			if len(merged) > 0 {
-				common.SuccessResp(c, merged[0])
-				return
-			}
-		}
-		if hasBase {
-			common.SuccessResp(c, baseInfo)
-			return
-		}
-		if hasCopy {
-			common.SuccessResp(c, copyInfo)
+		info, found := getMergedBaiduTaskInfo(tid, scope, cache)
+		if found {
+			common.SuccessResp(c, info)
 			return
 		}
 		common.ErrorStrResp(c, "task not found", 404)
 	})
 	g.POST("/cancel", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
-		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
-			return
-		}
-		tid, ok := requireTaskID(c)
-		if !ok {
-			return
-		}
-		applied := false
-		if applyActionForManager(manager, tid, isAdmin, uid, func(t T) {
-			if canTaskBeCanceled(t.GetState()) {
-				manager.Cancel(t.GetID())
-			}
-		}) {
-			applied = true
-		}
-		cache := map[string]bool{}
-		if applyActionForBaiduCopy(tid, isAdmin, uid, direction, cache, func(copyManager *tache.Manager[*fs.CopyTask], t *fs.CopyTask) {
-			if canTaskBeCanceled(t.GetState()) {
-				copyManager.Cancel(t.GetID())
-			}
-		}) {
-			applied = true
-		}
-		if applied {
-			common.SuccessResp(c)
-			return
-		}
-		common.ErrorStrResp(c, "task not found", 404)
+		applyCombinedTaskAction(c, func(scope taskUserScope, tid string) bool {
+			cache := map[string]bool{}
+			return applyBaiduCombinedAction(scope, tid,
+				func(t T) {
+					if canTaskBeCanceled(t.GetState()) {
+						manager.Cancel(t.GetID())
+					}
+				},
+				func(copyManager *tache.Manager[*fs.CopyTask], t *fs.CopyTask) {
+					if canTaskBeCanceled(t.GetState()) {
+						copyManager.Cancel(t.GetID())
+					}
+				},
+				cache,
+			)
+		})
 	})
 	g.POST("/pause", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
-		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
-			return
-		}
-		tid, ok := requireTaskID(c)
-		if !ok {
-			return
-		}
-		applied := false
-		if applyActionForManager(manager, tid, isAdmin, uid, func(t T) {
-			if canTaskBeCanceled(t.GetState()) {
-				manager.Cancel(t.GetID())
-			}
-		}) {
-			applied = true
-		}
-		cache := map[string]bool{}
-		if applyActionForBaiduCopy(tid, isAdmin, uid, direction, cache, func(copyManager *tache.Manager[*fs.CopyTask], t *fs.CopyTask) {
-			if canTaskBeCanceled(t.GetState()) {
-				copyManager.Cancel(t.GetID())
-			}
-		}) {
-			applied = true
-		}
-		if applied {
-			common.SuccessResp(c)
-			return
-		}
-		common.ErrorStrResp(c, "task not found", 404)
+		applyCombinedTaskAction(c, func(scope taskUserScope, tid string) bool {
+			cache := map[string]bool{}
+			return applyBaiduCombinedAction(scope, tid,
+				func(t T) {
+					if canTaskBeCanceled(t.GetState()) {
+						manager.Cancel(t.GetID())
+					}
+				},
+				func(copyManager *tache.Manager[*fs.CopyTask], t *fs.CopyTask) {
+					if canTaskBeCanceled(t.GetState()) {
+						copyManager.Cancel(t.GetID())
+					}
+				},
+				cache,
+			)
+		})
 	})
 	g.POST("/delete", func(c *gin.Context) {
-		isAdmin, uid, ok := getUserInfo(c)
-		if !ok {
-			common.ErrorStrResp(c, "user invalid", 401)
-			return
-		}
-		tid, ok := requireTaskID(c)
-		if !ok {
-			return
-		}
-		applied := false
-		if applyActionForManager(manager, tid, isAdmin, uid, func(t T) {
-			manager.Remove(t.GetID())
-		}) {
-			applied = true
-		}
-		cache := map[string]bool{}
-		if applyActionForBaiduCopy(tid, isAdmin, uid, direction, cache, func(copyManager *tache.Manager[*fs.CopyTask], t *fs.CopyTask) {
-			copyManager.Remove(t.GetID())
-		}) {
-			applied = true
-		}
-		if applied {
-			common.SuccessResp(c)
-			return
-		}
-		common.ErrorStrResp(c, "task not found", 404)
+		applyCombinedTaskAction(c, func(scope taskUserScope, tid string) bool {
+			cache := map[string]bool{}
+			return applyBaiduCombinedAction(scope, tid,
+				func(t T) { manager.Remove(t.GetID()) },
+				func(copyManager *tache.Manager[*fs.CopyTask], t *fs.CopyTask) { copyManager.Remove(t.GetID()) },
+				cache,
+			)
+		})
 	})
 	g.POST("/retry", func(c *gin.Context) {
 		isAdmin, uid, ok := getUserInfo(c)

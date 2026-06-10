@@ -43,3 +43,17 @@ func TestPrecheckLocalArchivePassword_ZipEncrypted_EmptyPassword(t *testing.T) {
 	require.ErrorAs(t, err, &reqErr)
 	require.Contains(t, reqErr.Error(), "zip")
 }
+
+func TestPrecheckLocalArchivePassword_ZipEncrypted_PasswordWithSpaces(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "a.txt")
+	require.NoError(t, osWriteFile(src, "zip-password-space-check"))
+
+	archive := filepath.Join(tmp, "a.zip")
+	password := " 123456 "
+	require.NoError(t, createLocalZipArchive(context.Background(), []string{src}, []string{"a.txt"}, archive, 5, password))
+
+	require.NoError(t, precheckLocalArchivePassword(context.Background(), archive, password))
+}

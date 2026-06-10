@@ -78,8 +78,7 @@ func (t *localBrowserExtractTask) markCreated() {
 }
 
 func (t *localBrowserExtractTask) markUpdated() {
-	t.UpdatedAt = time.Now().Unix()
-	t.Persist()
+	task.PersistOnTimestampChange(&t.UpdatedAt, time.Now().Unix(), t.Persist)
 }
 
 func (t *localBrowserExtractTask) markFinished() {
@@ -87,11 +86,19 @@ func (t *localBrowserExtractTask) markFinished() {
 	t.UpdatedAt = now
 	t.FinishedAt = now
 	t.Persist()
-	task.TriggerDoneTaskCleanup()
+	localBrowserExtractDoneTaskCleanup()
 }
 
 func (t *localBrowserExtractTask) GetFinishedAtUnix() int64 {
 	return t.FinishedAt
+}
+
+func (t *localBrowserExtractTask) GetUpdatedAtUnix() int64 {
+	return t.UpdatedAt
+}
+
+func (t *localBrowserExtractTask) GetCreatedAtUnix() int64 {
+	return t.CreatedAt
 }
 
 func (t *localBrowserExtractTask) releaseSensitiveData() {
@@ -101,12 +108,14 @@ func (t *localBrowserExtractTask) releaseSensitiveData() {
 var (
 	localBrowserExtractTaskManagerOnce sync.Once
 	localBrowserExtractTaskManagerInst *tache.Manager[*localBrowserExtractTask]
+	localBrowserExtractDoneTaskCleanup task.DoneTaskCleanupTrigger = func() {}
 )
 
 const (
 	localBrowserExtractWorkers       = 2
 	localBrowserExtractMaxRetry      = 3
 	localBrowserExtractTaskPersisted = true
+	localBrowserPersistDebounce      = time.Second
 )
 
 func localBrowserExtractTaskManager() *tache.Manager[*localBrowserExtractTask] {
@@ -117,9 +126,10 @@ func localBrowserExtractTaskManager() *tache.Manager[*localBrowserExtractTask] {
 				db.GetTaskDataFunc("local_browser_extract", localBrowserExtractTaskPersisted),
 				db.UpdateTaskDataFunc("local_browser_extract", localBrowserExtractTaskPersisted),
 			),
+			tache.WithPersistDebounce(localBrowserPersistDebounce),
 			tache.WithMaxRetry(localBrowserExtractMaxRetry),
 		)
-		task.StartDoneTaskCleanup(localBrowserExtractTaskManagerInst, task.DoneTaskCleanupConfig{
+		localBrowserExtractDoneTaskCleanup = task.StartDoneTaskCleanup(localBrowserExtractTaskManagerInst, task.DoneTaskCleanupConfig{
 			Name:      "local_browser_extract",
 			Interval:  5 * time.Minute,
 			Retention: 6 * time.Hour,

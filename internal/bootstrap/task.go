@@ -21,6 +21,7 @@ const (
 	defaultBaiduTaskMaxRetry     = 3
 	defaultBaiduDownloadMaxRetry = 3
 	defaultTaskMaxDone           = 100
+	defaultTaskPersistDebounce   = time.Second
 )
 
 func InitTaskManager() {
@@ -49,21 +50,23 @@ func InitTaskManager() {
 	fs.UploadTaskManager = tache.NewManager[*fs.UploadTask](
 		tache.WithWorks(defaultUploadTaskWorkers),
 		tache.WithPersistFunction(db.GetTaskDataFunc("upload", defaultTaskPersistent), db.UpdateTaskDataFunc("upload", defaultTaskPersistent)),
+		tache.WithPersistDebounce(defaultTaskPersistDebounce),
 		tache.WithMaxRetry(defaultUploadTaskMaxRetry),
 	)
 	fs.BaiduUploadTaskManager = tache.NewManager[*fs.UploadTask](
 		tache.WithWorks(baiduUploadWorkers),
 		tache.WithPersistFunction(db.GetTaskDataFunc("baidu_upload", defaultTaskPersistent), db.UpdateTaskDataFunc("baidu_upload", defaultTaskPersistent)),
+		tache.WithPersistDebounce(defaultTaskPersistDebounce),
 		tache.WithMaxRetry(baiduUploadRetry),
 	)
-	fs.CopyTaskManager = tache.NewManager[*fs.CopyTask](tache.WithWorks(defaultCopyTaskWorkers), tache.WithPersistFunction(db.GetTaskDataFunc("copy", defaultTaskPersistent), db.UpdateTaskDataFunc("copy", defaultTaskPersistent)), tache.WithMaxRetry(defaultCopyTaskMaxRetry))
-	fs.BaiduDownloadCopyTaskManager = tache.NewManager[*fs.CopyTask](tache.WithWorks(baiduCopyDownloadWorkers), tache.WithPersistFunction(db.GetTaskDataFunc("baidu_copy_download", defaultTaskPersistent), db.UpdateTaskDataFunc("baidu_copy_download", defaultTaskPersistent)), tache.WithMaxRetry(baiduDownloadRetry))
-	fs.BaiduUploadCopyTaskManager = tache.NewManager[*fs.CopyTask](tache.WithWorks(baiduCopyUploadWorkers), tache.WithPersistFunction(db.GetTaskDataFunc("baidu_copy_upload", defaultTaskPersistent), db.UpdateTaskDataFunc("baidu_copy_upload", defaultTaskPersistent)), tache.WithMaxRetry(baiduUploadRetry))
+	fs.CopyTaskManager = tache.NewManager[*fs.CopyTask](tache.WithWorks(defaultCopyTaskWorkers), tache.WithPersistFunction(db.GetTaskDataFunc("copy", defaultTaskPersistent), db.UpdateTaskDataFunc("copy", defaultTaskPersistent)), tache.WithPersistDebounce(defaultTaskPersistDebounce), tache.WithMaxRetry(defaultCopyTaskMaxRetry))
+	fs.BaiduDownloadCopyTaskManager = tache.NewManager[*fs.CopyTask](tache.WithWorks(baiduCopyDownloadWorkers), tache.WithPersistFunction(db.GetTaskDataFunc("baidu_copy_download", defaultTaskPersistent), db.UpdateTaskDataFunc("baidu_copy_download", defaultTaskPersistent)), tache.WithPersistDebounce(defaultTaskPersistDebounce), tache.WithMaxRetry(baiduDownloadRetry))
+	fs.BaiduUploadCopyTaskManager = tache.NewManager[*fs.CopyTask](tache.WithWorks(baiduCopyUploadWorkers), tache.WithPersistFunction(db.GetTaskDataFunc("baidu_copy_upload", defaultTaskPersistent), db.UpdateTaskDataFunc("baidu_copy_upload", defaultTaskPersistent)), tache.WithPersistDebounce(defaultTaskPersistDebounce), tache.WithMaxRetry(baiduUploadRetry))
 	// Backward compatibility: keep reading legacy baidu_copy tasks.
-	fs.BaiduCopyTaskManager = tache.NewManager[*fs.CopyTask](tache.WithWorks(baiduCopyDownloadWorkers), tache.WithPersistFunction(db.GetTaskDataFunc("baidu_copy", defaultTaskPersistent), db.UpdateTaskDataFunc("baidu_copy", defaultTaskPersistent)), tache.WithMaxRetry(baiduDownloadRetry))
+	fs.BaiduCopyTaskManager = tache.NewManager[*fs.CopyTask](tache.WithWorks(baiduCopyDownloadWorkers), tache.WithPersistFunction(db.GetTaskDataFunc("baidu_copy", defaultTaskPersistent), db.UpdateTaskDataFunc("baidu_copy", defaultTaskPersistent)), tache.WithPersistDebounce(defaultTaskPersistDebounce), tache.WithMaxRetry(baiduDownloadRetry))
 	_ = fs.MigratePendingBaiduCopyTasks()
 
-	taskx.StartDoneTaskCleanup(fs.UploadTaskManager, taskx.DoneTaskCleanupConfig{
+	fs.UploadDoneTaskCleanup = taskx.StartDoneTaskCleanup(fs.UploadTaskManager, taskx.DoneTaskCleanupConfig{
 		Name:      "upload",
 		Interval:  5 * time.Minute,
 		Retention: 4 * time.Hour,
@@ -71,7 +74,7 @@ func InitTaskManager() {
 	}, func(t *fs.UploadTask) int64 {
 		return t.GetFinishedAtUnix()
 	})
-	taskx.StartDoneTaskCleanup(fs.BaiduUploadTaskManager, taskx.DoneTaskCleanupConfig{
+	fs.BaiduUploadDoneTaskCleanup = taskx.StartDoneTaskCleanup(fs.BaiduUploadTaskManager, taskx.DoneTaskCleanupConfig{
 		Name:      "baidu_upload",
 		Interval:  5 * time.Minute,
 		Retention: 6 * time.Hour,
@@ -83,13 +86,14 @@ func InitTaskManager() {
 		name    string
 		manager *tache.Manager[*fs.CopyTask]
 		maxDone int
+		assign  func(taskx.DoneTaskCleanupTrigger)
 	}{
-		{name: "copy", manager: fs.CopyTaskManager, maxDone: defaultTaskMaxDone},
-		{name: "baidu_copy_download", manager: fs.BaiduDownloadCopyTaskManager, maxDone: defaultTaskMaxDone},
-		{name: "baidu_copy_upload", manager: fs.BaiduUploadCopyTaskManager, maxDone: defaultTaskMaxDone},
-		{name: "baidu_copy_legacy", manager: fs.BaiduCopyTaskManager, maxDone: defaultTaskMaxDone},
+		{name: "copy", manager: fs.CopyTaskManager, maxDone: defaultTaskMaxDone, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.CopyDoneTaskCleanup = trigger }},
+		{name: "baidu_copy_download", manager: fs.BaiduDownloadCopyTaskManager, maxDone: defaultTaskMaxDone, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduDownloadCopyDoneTaskCleanup = trigger }},
+		{name: "baidu_copy_upload", manager: fs.BaiduUploadCopyTaskManager, maxDone: defaultTaskMaxDone, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduUploadCopyDoneTaskCleanup = trigger }},
+		{name: "baidu_copy_legacy", manager: fs.BaiduCopyTaskManager, maxDone: defaultTaskMaxDone, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduCopyDoneTaskCleanup = trigger }},
 	} {
-		taskx.StartDoneTaskCleanup(cfg.manager, taskx.DoneTaskCleanupConfig{
+		trigger := taskx.StartDoneTaskCleanup(cfg.manager, taskx.DoneTaskCleanupConfig{
 			Name:      cfg.name,
 			Interval:  5 * time.Minute,
 			Retention: 12 * time.Hour,
@@ -97,6 +101,7 @@ func InitTaskManager() {
 		}, func(t *fs.CopyTask) int64 {
 			return t.GetFinishedAtUnix()
 		})
+		cfg.assign(trigger)
 	}
 	registerBaiduTaskManagerRefreshHook()
 }

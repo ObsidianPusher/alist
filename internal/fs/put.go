@@ -88,12 +88,12 @@ func (t *UploadTask) Run() (err error) {
 			t.OnCanceled()
 		}
 	}()
-	t.SetProgress(0)
+	task.SetProgressIfChanged(&t.Base, 0, 0)
 	err = op.Put(t.Ctx(), t.storage, t.DstDirActualPath, t.file, func(p float64) {
-		t.SetProgress(task.NormalizeProgress(p))
+		task.SetProgressIfChanged(&t.Base, p, task.DefaultProgressPersistStep)
 	}, true)
 	if err == nil {
-		t.SetProgress(100)
+		task.SetProgressIfChanged(&t.Base, 100, 0)
 	}
 	return err
 }
@@ -148,8 +148,7 @@ func (t *UploadTask) markCreated() {
 }
 
 func (t *UploadTask) markUpdated() {
-	t.UpdatedAt = time.Now().Unix()
-	t.Persist()
+	task.PersistOnTimestampChange(&t.UpdatedAt, time.Now().Unix(), t.Persist)
 }
 
 func (t *UploadTask) markFinished() {
@@ -157,11 +156,19 @@ func (t *UploadTask) markFinished() {
 	t.UpdatedAt = now
 	t.FinishedAt = now
 	t.Persist()
-	task.TriggerDoneTaskCleanup()
+	selectUploadDoneTaskCleanupByMountPath(t.StorageMp)()
 }
 
 func (t *UploadTask) GetFinishedAtUnix() int64 {
 	return t.FinishedAt
+}
+
+func (t *UploadTask) GetUpdatedAtUnix() int64 {
+	return t.UpdatedAt
+}
+
+func (t *UploadTask) GetCreatedAtUnix() int64 {
+	return t.CreatedAt
 }
 
 func (t *UploadTask) cleanupTempFile() {
@@ -202,6 +209,18 @@ func (t *UploadTask) OnSucceeded() {
 
 var UploadTaskManager *tache.Manager[*UploadTask]
 var BaiduUploadTaskManager *tache.Manager[*UploadTask]
+var UploadDoneTaskCleanup task.DoneTaskCleanupTrigger = func() {}
+var BaiduUploadDoneTaskCleanup task.DoneTaskCleanupTrigger = func() {}
+
+func selectUploadDoneTaskCleanupByMountPath(mountPath string) task.DoneTaskCleanupTrigger {
+	if isBaiduMountPath(mountPath) && BaiduUploadDoneTaskCleanup != nil {
+		return BaiduUploadDoneTaskCleanup
+	}
+	if UploadDoneTaskCleanup != nil {
+		return UploadDoneTaskCleanup
+	}
+	return func() {}
+}
 
 // putAsTask add as a put task and return immediately
 func putAsTask(ctx context.Context, dstDirPath string, file model.FileStreamer) (task.TaskInfoWithCreator, error) {

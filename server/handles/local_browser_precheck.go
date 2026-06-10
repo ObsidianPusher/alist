@@ -120,7 +120,7 @@ func precheckLocalRarPassword(ctx context.Context, archiveAbs, password string) 
 			if stderrors.Is(readErr, context.DeadlineExceeded) {
 				return archivePasswordPrecheckTimeoutError(localBrowserArchiveFormatRar)
 			}
-			if isRarPasswordError(readErr) || localBrowserIsArchivePasswordErrorMessage(readErr.Error()) || password != "" {
+			if isRarPasswordError(readErr) || localBrowserIsArchivePasswordErrorMessage(readErr.Error()) {
 				return archivePasswordRequestError(localBrowserArchiveFormatRar)
 			}
 		}

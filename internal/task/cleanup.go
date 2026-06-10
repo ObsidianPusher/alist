@@ -2,7 +2,6 @@ package task
 
 import (
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/alist-org/alist/v3/pkg/utils"
@@ -22,12 +21,15 @@ const (
 	defaultDoneTaskMaxCount        = 2000
 )
 
-var (
-	doneTaskCleanupMu        sync.Mutex
-	doneTaskCleanupCallbacks []func()
-	doneTaskCleanupOnce      sync.Once
-	doneTaskCleanupCh        = make(chan struct{}, 1)
-)
+type DoneTaskCleanupTrigger func()
+
+type updatedAtProvider interface {
+	GetUpdatedAtUnix() int64
+}
+
+type createdAtProvider interface {
+	GetCreatedAtUnix() int64
+}
 
 func normalizeDoneTaskCleanupConfig(cfg DoneTaskCleanupConfig) DoneTaskCleanupConfig {
 	if cfg.Name == "" {
@@ -49,6 +51,22 @@ func isDoneState(state tache.State) bool {
 	return state == tache.StateSucceeded || state == tache.StateCanceled || state == tache.StateFailed
 }
 
+func resolveDoneTaskTime[T tache.Task](task T, finishedAtUnix func(T) int64) int64 {
+	finished := finishedAtUnix(task)
+	if finished > 0 {
+		return finished
+	}
+	if provider, ok := any(task).(updatedAtProvider); ok {
+		if updated := provider.GetUpdatedAtUnix(); updated > 0 {
+			return updated
+		}
+	}
+	if provider, ok := any(task).(createdAtProvider); ok {
+		return provider.GetCreatedAtUnix()
+	}
+	return 0
+}
+
 func cleanupDoneTasks[T tache.Task](manager *tache.Manager[T], cfg DoneTaskCleanupConfig, finishedAtUnix func(T) int64) {
 	if manager == nil {
 		return
@@ -62,105 +80,103 @@ func cleanupDoneTasks[T tache.Task](manager *tache.Manager[T], cfg DoneTaskClean
 		return
 	}
 
+	type doneTaskMeta struct {
+		id       string
+		finished int64
+	}
+	metas := make([]doneTaskMeta, 0, len(done))
+	for _, t := range done {
+		metas = append(metas, doneTaskMeta{
+			id:       t.GetID(),
+			finished: resolveDoneTaskTime(t, finishedAtUnix),
+		})
+	}
+
+	removeIDs := make(map[string]struct{})
 	if cfg.Retention > 0 {
 		retentionSeconds := int64(cfg.Retention / time.Second)
-		for _, t := range done {
-			finished := finishedAtUnix(t)
-			if finished <= 0 {
+		for _, meta := range metas {
+			if meta.finished <= 0 {
 				continue
 			}
-			if now-finished >= retentionSeconds {
-				manager.Remove(t.GetID())
+			if now-meta.finished >= retentionSeconds {
+				removeIDs[meta.id] = struct{}{}
 			}
 		}
 	}
 
-	done = manager.GetByCondition(func(task T) bool {
-		return isDoneState(task.GetState())
-	})
-	if cfg.MaxDone <= 0 || len(done) <= cfg.MaxDone {
-		return
-	}
-
-	sort.Slice(done, func(i, j int) bool {
-		fi := finishedAtUnix(done[i])
-		fj := finishedAtUnix(done[j])
-		if fi == fj {
-			return done[i].GetID() < done[j].GetID()
+	remaining := metas[:0]
+	for _, meta := range metas {
+		if _, removed := removeIDs[meta.id]; removed {
+			continue
 		}
-		if fi <= 0 {
-			return true
-		}
-		if fj <= 0 {
-			return false
-		}
-		return fi < fj
-	})
-
-	removeCount := len(done) - cfg.MaxDone
-	for i := 0; i < removeCount; i++ {
-		manager.Remove(done[i].GetID())
+		remaining = append(remaining, meta)
 	}
-}
-
-func registerDoneTaskCleanup(callback func()) {
-	if callback == nil {
-		return
-	}
-	doneTaskCleanupMu.Lock()
-	doneTaskCleanupCallbacks = append(doneTaskCleanupCallbacks, callback)
-	doneTaskCleanupMu.Unlock()
-}
-
-func TriggerDoneTaskCleanup() {
-	doneTaskCleanupOnce.Do(func() {
-		utils.GoSafe("task_cleanup_dispatch", func() {
-			for range doneTaskCleanupCh {
-				runDoneTaskCleanupCallbacks()
-				drainDoneTaskCleanupSignal()
+	if cfg.MaxDone > 0 && len(remaining) > cfg.MaxDone {
+		sort.Slice(remaining, func(i, j int) bool {
+			fi := remaining[i].finished
+			fj := remaining[j].finished
+			if fi == fj {
+				return remaining[i].id < remaining[j].id
 			}
+			if fi <= 0 {
+				return true
+			}
+			if fj <= 0 {
+				return false
+			}
+			return fi < fj
 		})
-	})
-	select {
-	case doneTaskCleanupCh <- struct{}{}:
-	default:
+		removeCount := len(remaining) - cfg.MaxDone
+		for i := 0; i < removeCount; i++ {
+			removeIDs[remaining[i].id] = struct{}{}
+		}
+	}
+	for id := range removeIDs {
+		manager.Remove(id)
 	}
 }
 
-func drainDoneTaskCleanupSignal() {
-	for {
+func newDoneTaskCleanupTrigger(name string, callback func()) DoneTaskCleanupTrigger {
+	ch := make(chan struct{}, 1)
+	utils.GoSafe("task_cleanup_dispatch_"+name, func() {
+		for range ch {
+			callback()
+			for {
+				select {
+				case <-ch:
+				default:
+					goto next
+				}
+			}
+		next:
+		}
+	})
+	return func() {
 		select {
-		case <-doneTaskCleanupCh:
+		case ch <- struct{}{}:
 		default:
-			return
 		}
 	}
 }
 
-func runDoneTaskCleanupCallbacks() {
-	doneTaskCleanupMu.Lock()
-	callbacks := append([]func(){}, doneTaskCleanupCallbacks...)
-	doneTaskCleanupMu.Unlock()
-	for _, callback := range callbacks {
-		callback()
-	}
-}
-
-func StartDoneTaskCleanup[T tache.Task](manager *tache.Manager[T], cfg DoneTaskCleanupConfig, finishedAtUnix func(T) int64) {
+func StartDoneTaskCleanup[T tache.Task](manager *tache.Manager[T], cfg DoneTaskCleanupConfig, finishedAtUnix func(T) int64) DoneTaskCleanupTrigger {
 	if manager == nil || finishedAtUnix == nil {
-		return
+		return func() {}
 	}
 	cfg = normalizeDoneTaskCleanupConfig(cfg)
-
-	registerDoneTaskCleanup(func() {
+	callback := func() {
 		cleanupDoneTasks(manager, cfg, finishedAtUnix)
-	})
-	cleanupDoneTasks(manager, cfg, finishedAtUnix)
+	}
+	trigger := newDoneTaskCleanupTrigger(cfg.Name, callback)
+
+	callback()
 	utils.GoSafe("task_cleanup_"+cfg.Name, func() {
 		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 		for range ticker.C {
-			cleanupDoneTasks(manager, cfg, finishedAtUnix)
+			callback()
 		}
 	})
+	return trigger
 }

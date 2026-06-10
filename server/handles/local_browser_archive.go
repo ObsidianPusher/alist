@@ -182,9 +182,6 @@ func extractLocalRarArchive(ctx context.Context, archiveAbs, dstAbs, password st
 			return nil, &localBrowserRequestError{message: "wrong password or encrypted rar requires password"}
 		}
 		if isArchiveTruncatedOrCorrupted(err) {
-			if password != "" {
-				return nil, &localBrowserRequestError{message: "wrong password or encrypted rar requires password"}
-			}
 			return []string{
 				"rar archive is incomplete/corrupted, extracted files may be partial",
 			}, nil
@@ -206,9 +203,6 @@ func extractLocalRarArchive(ctx context.Context, archiveAbs, dstAbs, password st
 				return warnings, &localBrowserRequestError{message: "wrong password or encrypted rar requires password"}
 			}
 			if isArchiveTruncatedOrCorrupted(err) {
-				if password != "" {
-					return warnings, &localBrowserRequestError{message: "wrong password or encrypted rar requires password"}
-				}
 				warnings = append(warnings, "rar archive stream ended early (incomplete/corrupted)")
 				return warnings, nil
 			}
@@ -240,9 +234,6 @@ func extractLocalRarArchive(ctx context.Context, archiveAbs, dstAbs, password st
 		if copyErr != nil {
 			_ = os.Remove(targetPath)
 			if isArchiveTruncatedOrCorrupted(copyErr) {
-				if password != "" {
-					return warnings, &localBrowserRequestError{message: "wrong password or encrypted rar requires password"}
-				}
 				warnings = append(warnings, fmt.Sprintf("failed to fully extract %s: archive stream ended early", header.Name))
 				return warnings, nil
 			}
@@ -270,9 +261,6 @@ func extractLocalSevenZipArchive(ctx context.Context, archiveAbs, dstAbs, passwo
 			return nil, &localBrowserRequestError{message: "wrong password or encrypted 7z requires password"}
 		}
 		if isArchiveTruncatedOrCorrupted(err) {
-			if password != "" {
-				return nil, &localBrowserRequestError{message: "wrong password or encrypted 7z requires password"}
-			}
 			return []string{
 				"7z archive is incomplete/corrupted, extracted files may be partial",
 			}, nil
@@ -309,9 +297,6 @@ func extractLocalSevenZipArchive(ctx context.Context, archiveAbs, dstAbs, passwo
 				return warnings, &localBrowserRequestError{message: "wrong password or encrypted 7z requires password"}
 			}
 			if isArchiveTruncatedOrCorrupted(err) {
-				if password != "" {
-					return warnings, &localBrowserRequestError{message: "wrong password or encrypted 7z requires password"}
-				}
 				warnings = append(warnings, fmt.Sprintf("skip %s: archive entry is incomplete/corrupted", f.Name))
 				continue
 			}
@@ -328,9 +313,6 @@ func extractLocalSevenZipArchive(ctx context.Context, archiveAbs, dstAbs, passwo
 		if copyErr != nil {
 			_ = os.Remove(targetPath)
 			if isArchiveTruncatedOrCorrupted(copyErr) {
-				if password != "" {
-					return warnings, &localBrowserRequestError{message: "wrong password or encrypted 7z requires password"}
-				}
 				warnings = append(warnings, fmt.Sprintf("failed to fully extract %s: archive entry ended early", f.Name))
 				continue
 			}
@@ -341,9 +323,6 @@ func extractLocalSevenZipArchive(ctx context.Context, archiveAbs, dstAbs, passwo
 		}
 		if closeSrcErr != nil {
 			if isArchiveTruncatedOrCorrupted(closeSrcErr) {
-				if password != "" {
-					return warnings, &localBrowserRequestError{message: "wrong password or encrypted 7z requires password"}
-				}
 				_ = os.Remove(targetPath)
 				warnings = append(warnings, fmt.Sprintf("failed to fully extract %s: archive entry ended early", f.Name))
 				continue

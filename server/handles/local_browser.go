@@ -324,9 +324,9 @@ func LocalBrowserCompress(c *gin.Context) {
 		archiveName += ".zip"
 	}
 	level := clampZipLevel(setting.GetInt(conf.LocalBrowserZipLevel, 5))
-	password := strings.TrimSpace(req.Password)
+	password := req.Password
 	if password == "" {
-		password = strings.TrimSpace(setting.GetStr(conf.LocalBrowserZipPassword))
+		password = setting.GetStr(conf.LocalBrowserZipPassword)
 	}
 	baseAbs := dirObj.GetPath()
 	dstAbs := filepath.Join(baseAbs, archiveName)
@@ -424,9 +424,9 @@ func LocalBrowserExtract(c *gin.Context) {
 		common.ErrorStrResp(c, "destination is not a directory", 400)
 		return
 	}
-	password := strings.TrimSpace(req.Password)
+	password := req.Password
 	if password == "" {
-		password = strings.TrimSpace(setting.GetStr(conf.LocalBrowserZipPassword))
+		password = setting.GetStr(conf.LocalBrowserZipPassword)
 	}
 
 	type localBrowserExtractJob struct {
@@ -1344,14 +1344,14 @@ func extractSingleLocalZipEntry(ctx context.Context, f *zip.File, dstAbs, passwo
 	closeDstErr := dst.Close()
 	if copyErr != nil {
 		_ = os.Remove(cleanTarget)
-		if f.IsEncrypted() && isArchiveTruncatedOrCorrupted(copyErr) {
+		if f.IsEncrypted() && localBrowserIsArchivePasswordErrorMessage(copyErr.Error()) {
 			return archivePasswordRequestError(localBrowserArchiveFormatZip)
 		}
 		return copyErr
 	}
 	if closeSrcErr != nil {
 		_ = os.Remove(cleanTarget)
-		if f.IsEncrypted() && isArchiveTruncatedOrCorrupted(closeSrcErr) {
+		if f.IsEncrypted() && localBrowserIsArchivePasswordErrorMessage(closeSrcErr.Error()) {
 			return archivePasswordRequestError(localBrowserArchiveFormatZip)
 		}
 		return closeSrcErr

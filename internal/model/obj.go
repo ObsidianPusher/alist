@@ -3,7 +3,6 @@ package model
 import (
 	"io"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/alist-org/alist/v3/pkg/http_range"
@@ -199,11 +198,7 @@ func (om *ObjMerge) clickObj(obj Obj) bool {
 }
 
 func (om *ObjMerge) InitHideReg(hides string) {
-	rs := strings.Split(hides, "\n")
-	om.regs = make([]*regexp2.Regexp, 0, len(rs))
-	for _, r := range rs {
-		om.regs = append(om.regs, regexp2.MustCompile(r, regexp2.None))
-	}
+	om.regs = CompileHidePatterns(hides)
 }
 
 func (om *ObjMerge) Reset() {

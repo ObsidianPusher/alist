@@ -98,7 +98,7 @@ func (t *CopyTask) Run() (err error) {
 	if err := copyBetween2Storages(t, t.srcStorage, t.dstStorage, t.SrcObjPath, t.DstDirPath); err != nil {
 		return err
 	}
-	t.SetProgress(100)
+	task.SetProgressIfChanged(&t.Base, 100, 0)
 	op.ClearCache(t.dstStorage, t.DstDirPath)
 	if t.isMove() {
 		op.ClearCache(t.srcStorage, stdpath.Dir(t.SrcObjPath))
@@ -139,7 +139,7 @@ func (t *CopyTask) initProgress(total int64) {
 	t.DoneBytes = 0
 	t.fileSize = 0
 	t.fileDone = 0
-	t.SetProgress(0)
+	task.SetProgressIfChanged(&t.Base, 0, 0)
 	t.progressMu.Unlock()
 	t.markUpdated()
 }
@@ -214,7 +214,7 @@ func (t *CopyTask) refreshProgressLocked() {
 			if done > t.fileSize {
 				done = t.fileSize
 			}
-			t.SetProgress(task.NormalizeProgress(float64(done) * 100 / float64(t.fileSize)))
+			task.SetProgressIfChanged(&t.Base, float64(done)*100/float64(t.fileSize), task.DefaultProgressPersistStep)
 		}
 		return
 	}
@@ -225,7 +225,7 @@ func (t *CopyTask) refreshProgressLocked() {
 	if done > t.TotalBytes {
 		done = t.TotalBytes
 	}
-	t.SetProgress(task.NormalizeProgress(float64(done) * 100 / float64(t.TotalBytes)))
+	task.SetProgressIfChanged(&t.Base, float64(done)*100/float64(t.TotalBytes), task.DefaultProgressPersistStep)
 }
 
 func (t *CopyTask) markCreated() {
@@ -239,8 +239,7 @@ func (t *CopyTask) markCreated() {
 }
 
 func (t *CopyTask) markUpdated() {
-	t.UpdatedAt = time.Now().Unix()
-	t.Persist()
+	task.PersistOnTimestampChange(&t.UpdatedAt, time.Now().Unix(), t.Persist)
 }
 
 func (t *CopyTask) markFinished() {
@@ -248,17 +247,29 @@ func (t *CopyTask) markFinished() {
 	t.UpdatedAt = now
 	t.FinishedAt = now
 	t.Persist()
-	task.TriggerDoneTaskCleanup()
+	selectCopyDoneTaskCleanupByMountPath(t.SrcStorageMp, t.DstStorageMp)()
 }
 
 func (t *CopyTask) GetFinishedAtUnix() int64 {
 	return t.FinishedAt
 }
 
+func (t *CopyTask) GetUpdatedAtUnix() int64 {
+	return t.UpdatedAt
+}
+
+func (t *CopyTask) GetCreatedAtUnix() int64 {
+	return t.CreatedAt
+}
+
 var CopyTaskManager *tache.Manager[*CopyTask]
 var BaiduCopyTaskManager *tache.Manager[*CopyTask]
 var BaiduDownloadCopyTaskManager *tache.Manager[*CopyTask]
 var BaiduUploadCopyTaskManager *tache.Manager[*CopyTask]
+var CopyDoneTaskCleanup task.DoneTaskCleanupTrigger = func() {}
+var BaiduCopyDoneTaskCleanup task.DoneTaskCleanupTrigger = func() {}
+var BaiduDownloadCopyDoneTaskCleanup task.DoneTaskCleanupTrigger = func() {}
+var BaiduUploadCopyDoneTaskCleanup task.DoneTaskCleanupTrigger = func() {}
 var baiduCopyTaskLimiter = newNamedTokenLimiter()
 
 func selectCrossStorageTaskManager(srcStorage, dstStorage driver.Driver) *tache.Manager[*CopyTask] {
@@ -289,6 +300,24 @@ func selectCrossStorageTaskManagerByMountPath(srcMountPath, dstMountPath string)
 		return BaiduCopyTaskManager
 	}
 	return CopyTaskManager
+}
+
+func selectCopyDoneTaskCleanupByMountPath(srcMountPath, dstMountPath string) task.DoneTaskCleanupTrigger {
+	srcBaidu := isBaiduMountPath(srcMountPath)
+	dstBaidu := isBaiduMountPath(dstMountPath)
+	if srcBaidu && BaiduDownloadCopyDoneTaskCleanup != nil {
+		return BaiduDownloadCopyDoneTaskCleanup
+	}
+	if dstBaidu && BaiduUploadCopyDoneTaskCleanup != nil {
+		return BaiduUploadCopyDoneTaskCleanup
+	}
+	if (srcBaidu || dstBaidu) && BaiduCopyDoneTaskCleanup != nil {
+		return BaiduCopyDoneTaskCleanup
+	}
+	if CopyDoneTaskCleanup != nil {
+		return CopyDoneTaskCleanup
+	}
+	return func() {}
 }
 
 func buildCrossStorageTask(ctx context.Context, srcStorage, dstStorage driver.Driver, srcObjActualPath, dstDirActualPath string, operation FileOperation) *CopyTask {

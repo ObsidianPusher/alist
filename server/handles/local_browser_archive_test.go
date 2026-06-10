@@ -245,6 +245,29 @@ func TestCreateAndExtractLocalZipArchive_WithPassword(t *testing.T) {
 	require.Equal(t, "zip-password-ok", string(got))
 }
 
+func TestCreateAndExtractLocalZipArchive_WithPasswordContainingSpaces(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "a.txt")
+	require.NoError(t, osWriteFile(src, "zip-password-space-ok"))
+	archive := filepath.Join(tmp, "a.zip")
+
+	password := " 123456 "
+	err := createLocalZipArchive(context.Background(), []string{src}, []string{"a.txt"}, archive, 5, password)
+	require.NoError(t, err)
+
+	outDir := filepath.Join(tmp, "out")
+	require.NoError(t, os.MkdirAll(outDir, 0o755))
+	warnings, err := extractLocalZipArchive(context.Background(), archive, outDir, password)
+	require.NoError(t, err)
+	require.Empty(t, warnings)
+
+	got, err := os.ReadFile(filepath.Join(outDir, "a.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "zip-password-space-ok", string(got))
+}
+
 func TestExtractLocalZipArchive_TruncatedArchiveReturnsWarning(t *testing.T) {
 	t.Parallel()
 
