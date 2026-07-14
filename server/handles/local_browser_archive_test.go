@@ -1,6 +1,7 @@
 package handles
 
 import (
+	stdzip "archive/zip"
 	"context"
 	stderrors "errors"
 	"os"
@@ -310,6 +311,100 @@ func TestExtractLocalZipArchive_WrongPasswordFails(t *testing.T) {
 	reqErr := &localBrowserRequestError{}
 	require.ErrorAs(t, err, &reqErr)
 	require.Contains(t, reqErr.Error(), "zip")
+}
+
+func TestExtractLocalZipArchiveEntries_SkipsUnsupportedEntryTypes(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archive := filepath.Join(tmp, "unsupported.zip")
+	file, err := os.Create(archive)
+	require.NoError(t, err)
+
+	writer := stdzip.NewWriter(file)
+	hdr := &stdzip.FileHeader{
+		Name:   "bad-link",
+		Method: stdzip.Store,
+	}
+	hdr.SetMode(os.ModeSymlink | 0o777)
+	entryWriter, err := writer.CreateHeader(hdr)
+	require.NoError(t, err)
+	_, err = entryWriter.Write([]byte("target"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	require.NoError(t, file.Close())
+
+	outDir := filepath.Join(tmp, "out")
+	require.NoError(t, os.MkdirAll(outDir, 0o755))
+	warnings, err := extractLocalZipArchive(context.Background(), archive, outDir, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, warnings)
+	require.Contains(t, strings.Join(warnings, "\n"), "symlink entry is not supported")
+}
+
+func TestCreateLocalZipArchive_SkipsUnsupportedFiles(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "data")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	require.NoError(t, osWriteFile(filepath.Join(root, "ok.txt"), "ok"))
+	require.NoError(t, os.Symlink(filepath.Join(root, "ok.txt"), filepath.Join(root, "link.txt")))
+
+	archive := filepath.Join(tmp, "data.zip")
+	warnings, err := createLocalZipArchiveWithWarnings(context.Background(), []string{root}, []string{"data"}, archive, 5, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, warnings)
+	require.Contains(t, strings.Join(warnings, "\n"), "symlink is not supported")
+
+	reader, err := stdzip.OpenReader(archive)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	names := make([]string, 0, len(reader.File))
+	for _, f := range reader.File {
+		names = append(names, f.Name)
+	}
+	require.Contains(t, names, "data/")
+	require.Contains(t, names, "data/ok.txt")
+	require.NotContains(t, names, "data/link.txt")
+}
+
+func TestCreateLocalZipArchive_OnlyUnsupportedFilesKeepsEmptyDir(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "data")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(root, "missing.txt"), filepath.Join(root, "link.txt")))
+
+	archive := filepath.Join(tmp, "data.zip")
+	warnings, err := createLocalZipArchiveWithWarnings(context.Background(), []string{root}, []string{"data"}, archive, 5, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, warnings)
+	require.Contains(t, strings.Join(warnings, "\n"), "symlink is not supported")
+
+	reader, err := stdzip.OpenReader(archive)
+	require.NoError(t, err)
+	defer reader.Close()
+	require.Len(t, reader.File, 1)
+	require.Equal(t, "data/", reader.File[0].Name)
+}
+
+func TestLocalBrowserExtractUnsupportedTypeWarning(t *testing.T) {
+	t.Parallel()
+
+	warning, skip := localBrowserExtractUnsupportedTypeWarning("a.sock", os.ModeSocket)
+	require.True(t, skip)
+	require.Contains(t, warning, "socket entry is not supported")
+
+	warning, skip = localBrowserExtractUnsupportedTypeWarning("a.pipe", os.ModeNamedPipe)
+	require.True(t, skip)
+	require.Contains(t, warning, "named pipe entry is not supported")
+
+	warning, skip = localBrowserExtractUnsupportedTypeWarning("a.txt", 0o644)
+	require.False(t, skip)
+	require.Empty(t, warning)
 }
 
 func TestIsArchiveTruncatedOrCorrupted(t *testing.T) {

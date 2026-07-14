@@ -1,12 +1,11 @@
 import { Center, VStack, Icon } from "@hope-ui/solid"
-import { Motion } from "@motionone/solid"
 import { useContextMenu } from "solid-contextmenu"
 import { batch, createMemo, createSignal, Show } from "solid-js"
 import { CenterLoading, ImageWithError } from "~/components"
 import { useLink, usePath, useUtil } from "~/hooks"
-import { checkboxOpen, getMainColor, objStore, selectAll, selectIndex } from "~/store"
+import { checkboxOpen, getMainColor, getSetting, objStore, selectAll, selectIndex } from "~/store"
 import { ObjType, StoreObj } from "~/types"
-import { bus } from "~/utils"
+import { api, bus } from "~/utils"
 import { getIconByObj } from "~/utils/icon"
 import {
   ItemCheckbox,
@@ -24,6 +23,22 @@ export const ImageItem = (props: { obj: StoreObj; index: number }) => {
     <Icon color={getMainColor()} boxSize="$12" as={getIconByObj(props.obj)} />
   )
   const isLocalProvider = createMemo(() => /Local/i.test(objStore.provider || ""))
+  const thumbSrc = createMemo(() => {
+    if (!isLocalProvider()) return ""
+    const raw = rawLink(props.obj, true)
+    const sep = raw.includes("?") ? "&" : "?"
+    if (props.obj.thumb) {
+      const thumb = props.obj.thumb.startsWith("/d")
+        ? `${api}${props.obj.thumb}`
+        : props.obj.thumb
+      return thumb.includes("type=thumb") ? thumb : `${thumb}${sep}type=thumb`
+    }
+    return `${raw}${sep}type=thumb`
+  })
+  const imageSize = createMemo(() => {
+    const size = Number.parseInt(getSetting("image_view_item_size") || "", 10)
+    return Number.isFinite(size) && size > 0 ? size : 150
+  })
   const [hover, setHover] = createSignal(false)
   const showCheckbox = createMemo(
     () => checkboxOpen() && (hover() || props.obj.selected),
@@ -33,12 +48,12 @@ export const ImageItem = (props: { obj: StoreObj; index: number }) => {
   const { isMouseSupported } = useSelectWithMouse()
   const isShouldOpenItem = useOpenItemWithCheckbox()
   return (
-    <Motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.2 }}
+    <div
       style={{
         "flex-grow": 1,
+        contain: "layout paint style",
+        "content-visibility": "auto",
+        "contain-intrinsic-size": "100px 180px",
       }}
     >
       <VStack
@@ -108,20 +123,21 @@ export const ImageItem = (props: { obj: StoreObj; index: number }) => {
           </Show>
           <Show when={isLocalProvider()} fallback={objIcon}>
             <ImageWithError
-              h="150px"
+              h={`${imageSize()}px`}
               w="$full"
               objectFit="cover"
               rounded="$lg"
               shadow="$md"
               fallback={<CenterLoading size="lg" />}
               fallbackErr={objIcon}
-              src={rawLink(props.obj)}
+              src={thumbSrc() || rawLink(props.obj)}
               alt={props.obj.name}
               loading="lazy"
+              decoding="async"
             />
           </Show>
         </Center>
       </VStack>
-    </Motion.div>
+    </div>
   )
 }

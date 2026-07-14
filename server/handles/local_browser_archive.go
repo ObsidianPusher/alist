@@ -219,8 +219,9 @@ func extractLocalRarArchive(ctx context.Context, archiveAbs, dstAbs, password st
 			}
 			continue
 		}
-		if mode&os.ModeSymlink != 0 {
-			return warnings, errors.Errorf("unsupported symlink entry: %s", header.Name)
+		if warning, skip := localBrowserExtractUnsupportedTypeWarning(header.Name, mode); skip {
+			warnings = append(warnings, warning)
+			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return warnings, err
@@ -285,8 +286,9 @@ func extractLocalSevenZipArchive(ctx context.Context, archiveAbs, dstAbs, passwo
 			}
 			continue
 		}
-		if mode&os.ModeSymlink != 0 {
-			return warnings, errors.Errorf("unsupported symlink entry: %s", f.Name)
+		if warning, skip := localBrowserExtractUnsupportedTypeWarning(f.Name, mode); skip {
+			warnings = append(warnings, warning)
+			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return warnings, err
@@ -927,6 +929,30 @@ func localBrowserNormalizeFileMode(mode os.FileMode) os.FileMode {
 		return 0o644
 	}
 	return perm
+}
+
+func localBrowserExtractUnsupportedTypeWarning(entryName string, mode os.FileMode) (string, bool) {
+	switch {
+	case mode&os.ModeSymlink != 0:
+		return fmt.Sprintf("skip %s: symlink entry is not supported", entryName), true
+	case mode&os.ModeSocket != 0:
+		return fmt.Sprintf("skip %s: socket entry is not supported", entryName), true
+	case mode&os.ModeNamedPipe != 0:
+		return fmt.Sprintf("skip %s: named pipe entry is not supported", entryName), true
+	case mode&os.ModeDevice != 0:
+		return fmt.Sprintf("skip %s: device entry is not supported", entryName), true
+	case !mode.IsRegular():
+		return fmt.Sprintf("skip %s: unsupported archive entry type", entryName), true
+	default:
+		return "", false
+	}
+}
+
+func localBrowserIsSkipWarning(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(err.Error()), "skip ")
 }
 
 func isRarPasswordError(err error) bool {

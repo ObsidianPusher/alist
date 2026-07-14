@@ -1030,6 +1030,7 @@ func hasBaiduGroupTarget[T task.TaskInfoWithCreator](tid string, manager *tache.
 
 func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTask], groupLabel string) {
 	extractManager := localBrowserExtractTaskManager()
+	compressManager := localBrowserCompressTaskManager()
 	filterCopyTasks := func(scope taskUserScope, cache map[string]bool) []*fs.CopyTask {
 		return manager.GetByCondition(func(task *fs.CopyTask) bool {
 			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && !isCopyTaskBaidu(task, cache)
@@ -1037,6 +1038,11 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 	}
 	filterExtractTasks := func(scope taskUserScope) []*localBrowserExtractTask {
 		return extractManager.GetByCondition(func(task *localBrowserExtractTask) bool {
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid)
+		})
+	}
+	filterCompressTasks := func(scope taskUserScope) []*localBrowserCompressTask {
+		return compressManager.GetByCondition(func(task *localBrowserCompressTask) bool {
 			return taskOwnedByUser(task, scope.isAdmin, scope.uid)
 		})
 	}
@@ -1088,7 +1094,8 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 		cache := map[string]bool{}
 		copyInfos := groupTaskInfos(filterCopyTasks(scope, cache), groupLabel)
 		extractInfos := groupTaskInfos(filterExtractTasks(scope), groupLabel)
-		merged := mergeGroupedTaskInfos(append(copyInfos, extractInfos...), groupLabel)
+		compressInfos := groupTaskInfos(filterCompressTasks(scope), groupLabel)
+		merged := mergeGroupedTaskInfos(append(append(copyInfos, extractInfos...), compressInfos...), groupLabel)
 		respondTaskList(c, merged,
 			tache.StatePending, tache.StateRunning, tache.StateCanceling, tache.StateErrored,
 			tache.StateFailing, tache.StateWaitingRetry, tache.StateBeforeRetry)
@@ -1101,7 +1108,8 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 		cache := map[string]bool{}
 		copyInfos := groupTaskInfos(filterCopyTasks(scope, cache), groupLabel)
 		extractInfos := groupTaskInfos(filterExtractTasks(scope), groupLabel)
-		merged := mergeGroupedTaskInfos(append(copyInfos, extractInfos...), groupLabel)
+		compressInfos := groupTaskInfos(filterCompressTasks(scope), groupLabel)
+		merged := mergeGroupedTaskInfos(append(append(copyInfos, extractInfos...), compressInfos...), groupLabel)
 		respondTaskList(c, merged, tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 	})
 	g.POST("/info", func(c *gin.Context) {
@@ -1112,7 +1120,8 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 		cache := map[string]bool{}
 		copyInfo, _ := getCopyTaskInfo(tid, scope, cache)
 		extractInfo, _ := getTaskInfoForManager(extractManager, tid, scope.isAdmin, scope.uid, groupLabel)
-		if respondMergedTaskInfo(c, groupLabel, copyInfo, extractInfo) {
+		compressInfo, _ := getTaskInfoForManager(compressManager, tid, scope.isAdmin, scope.uid, groupLabel)
+		if respondMergedTaskInfo(c, groupLabel, copyInfo, extractInfo, compressInfo) {
 			return
 		}
 		common.ErrorStrResp(c, "task not found", 404)
@@ -1131,6 +1140,13 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 				return applyActionForManager(extractManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserExtractTask) {
 					if canTaskBeCanceled(t.GetState()) {
 						extractManager.Cancel(t.GetID())
+					}
+				})
+			},
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(compressManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserCompressTask) {
+					if canTaskBeCanceled(t.GetState()) {
+						compressManager.Cancel(t.GetID())
 					}
 				})
 			},
@@ -1153,6 +1169,13 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 					}
 				})
 			},
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(compressManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserCompressTask) {
+					if canTaskBeCanceled(t.GetState()) {
+						compressManager.Cancel(t.GetID())
+					}
+				})
+			},
 		)
 	})
 	g.POST("/delete", func(c *gin.Context) {
@@ -1166,6 +1189,11 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 			func(scope taskUserScope, tid string) bool {
 				return applyActionForManager(extractManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserExtractTask) {
 					extractManager.Remove(t.GetID())
+				})
+			},
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(compressManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserCompressTask) {
+					compressManager.Remove(t.GetID())
 				})
 			},
 		)
@@ -1186,6 +1214,14 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 					if canTaskBeRetried(t.GetState()) {
 						prepareTaskForRetry(t)
 						extractManager.Retry(t.GetID())
+					}
+				})
+			},
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(compressManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserCompressTask) {
+					if canTaskBeRetried(t.GetState()) {
+						prepareTaskForRetry(t)
+						compressManager.Retry(t.GetID())
 					}
 				})
 			},
@@ -1210,6 +1246,14 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 					}
 				})
 			},
+			func(scope taskUserScope, tid string) bool {
+				return applyActionForManager(compressManager, tid, scope.isAdmin, scope.uid, func(t *localBrowserCompressTask) {
+					if canTaskBeRetried(t.GetState()) {
+						prepareTaskForRetry(t)
+						compressManager.Retry(t.GetID())
+					}
+				})
+			},
 		)
 	})
 	g.POST("/clear_done", func(c *gin.Context) {
@@ -1227,6 +1271,10 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 			return taskOwnedByUser(task, scope.isAdmin, scope.uid) &&
 				argsContains(task.GetState(), tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
 		})
+		compressManager.RemoveByCondition(func(task *localBrowserCompressTask) bool {
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) &&
+				argsContains(task.GetState(), tache.StateCanceled, tache.StateFailed, tache.StateSucceeded)
+		})
 		common.SuccessResp(c)
 	})
 	g.POST("/clear_succeeded", func(c *gin.Context) {
@@ -1239,6 +1287,9 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && !isCopyTaskBaidu(task, cache) && task.GetState() == tache.StateSucceeded
 		})
 		extractManager.RemoveByCondition(func(task *localBrowserExtractTask) bool {
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateSucceeded
+		})
+		compressManager.RemoveByCondition(func(task *localBrowserCompressTask) bool {
 			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateSucceeded
 		})
 		common.SuccessResp(c)
@@ -1262,6 +1313,13 @@ func taskRouteCopyFiltered(g *gin.RouterGroup, manager *tache.Manager[*fs.CopyTa
 		for _, t := range extractTasks {
 			prepareTaskForRetry(t)
 			extractManager.Retry(t.GetID())
+		}
+		compressTasks := compressManager.GetByCondition(func(task *localBrowserCompressTask) bool {
+			return taskOwnedByUser(task, scope.isAdmin, scope.uid) && task.GetState() == tache.StateFailed
+		})
+		for _, t := range compressTasks {
+			prepareTaskForRetry(t)
+			compressManager.Retry(t.GetID())
 		}
 		common.SuccessResp(c)
 	})

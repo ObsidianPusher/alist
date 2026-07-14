@@ -417,7 +417,7 @@ const Browser = () => {
       password: password(),
     })
     handleResp(resp, () => {
-      notify.success(t("home.local_browser.compress_success"))
+      notify.success(t("home.local_browser.compress_task_created"))
       compressModal.onClose()
       setPassword("")
       void refreshList()

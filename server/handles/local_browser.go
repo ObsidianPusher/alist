@@ -368,12 +368,11 @@ func LocalBrowserCompress(c *gin.Context) {
 		common.ErrorStrResp(c, "no valid files selected", 400)
 		return
 	}
-	if err := createLocalZipArchive(c, srcAbs, srcNames, dstAbs, level, password); err != nil {
-		common.ErrorResp(c, err, 500)
-		return
-	}
+	dstPath := stdpath.Join(dirPath, archiveName)
+	addedTask := enqueueLocalBrowserCompressTask(c, user, dirPath, dstPath, dstAbs, srcAbs, srcNames, level, password)
 	common.SuccessResp(c, gin.H{
-		"archive_path": stdpath.Join(dirPath, archiveName),
+		"archive_path": dstPath,
+		"task":         getTaskInfo(addedTask),
 	})
 }
 
@@ -1059,13 +1058,35 @@ func clampZipLevel(level int) int {
 }
 
 func createLocalZipArchive(ctx context.Context, srcAbs []string, srcNames []string, dstAbs string, level int, password string) error {
-	if strings.TrimSpace(password) == "" {
-		return createLocalZipArchivePlain(ctx, srcAbs, srcNames, dstAbs, level)
-	}
-	return createLocalZipArchiveEncrypted(ctx, srcAbs, srcNames, dstAbs, level, password)
+	_, err := createLocalZipArchiveWithWarnings(ctx, srcAbs, srcNames, dstAbs, level, password)
+	return err
 }
 
-func createLocalZipArchivePlain(ctx context.Context, srcAbs []string, srcNames []string, dstAbs string, level int) error {
+type localBrowserZipEntry struct {
+	absPath string
+	zipName string
+	info    os.FileInfo
+	isDir   bool
+}
+
+func createLocalZipArchiveWithWarnings(ctx context.Context, srcAbs []string, srcNames []string, dstAbs string, level int, password string) ([]string, error) {
+	entries, warnings, err := collectLocalZipEntries(ctx, srcAbs, srcNames)
+	if err != nil {
+		return warnings, err
+	}
+	if len(entries) == 0 {
+		if len(warnings) == 0 {
+			return nil, errors.New("no supported files to compress")
+		}
+		return warnings, errors.New("no supported files to compress")
+	}
+	if strings.TrimSpace(password) == "" {
+		return warnings, createLocalZipArchivePlain(ctx, entries, dstAbs, level)
+	}
+	return warnings, createLocalZipArchiveEncrypted(ctx, entries, dstAbs, level, password)
+}
+
+func createLocalZipArchivePlain(ctx context.Context, entries []localBrowserZipEntry, dstAbs string, level int) error {
 	level = clampZipLevel(level)
 	file, err := os.Create(dstAbs)
 	if err != nil {
@@ -1080,12 +1101,12 @@ func createLocalZipArchivePlain(ctx context.Context, srcAbs []string, srcNames [
 			return flate.NewWriter(w, flateLevel)
 		})
 	}
-	for i, src := range srcAbs {
+	for _, entry := range entries {
 		if ctx.Err() != nil {
 			_ = zipWriter.Close()
 			return ctx.Err()
 		}
-		if err := addPathToStdZip(ctx, zipWriter, src, srcNames[i], store); err != nil {
+		if err := writeStdZipEntry(ctx, zipWriter, entry, store); err != nil {
 			_ = zipWriter.Close()
 			return err
 		}
@@ -1093,7 +1114,7 @@ func createLocalZipArchivePlain(ctx context.Context, srcAbs []string, srcNames [
 	return zipWriter.Close()
 }
 
-func createLocalZipArchiveEncrypted(ctx context.Context, srcAbs []string, srcNames []string, dstAbs string, level int, password string) error {
+func createLocalZipArchiveEncrypted(ctx context.Context, entries []localBrowserZipEntry, dstAbs string, level int, password string) error {
 	_ = level // yeka/zip has global compressor registration, no per-writer level override.
 	file, err := os.Create(dstAbs)
 	if err != nil {
@@ -1101,12 +1122,12 @@ func createLocalZipArchiveEncrypted(ctx context.Context, srcAbs []string, srcNam
 	}
 	defer file.Close()
 	zipWriter := zip.NewWriter(file)
-	for i, src := range srcAbs {
+	for _, entry := range entries {
 		if ctx.Err() != nil {
 			_ = zipWriter.Close()
 			return ctx.Err()
 		}
-		if err := addPathToZip(ctx, zipWriter, src, srcNames[i], level == 0, password); err != nil {
+		if err := writeEncryptedZipEntry(ctx, zipWriter, entry, level == 0, password); err != nil {
 			_ = zipWriter.Close()
 			return err
 		}
@@ -1123,48 +1144,6 @@ func localBrowserZipFlateLevel(level int) int {
 	default:
 		return level
 	}
-}
-
-func addPathToStdZip(ctx context.Context, zw *stdzip.Writer, srcAbs, entryName string, store bool) error {
-	srcAbs = filepath.Clean(srcAbs)
-	info, err := os.Stat(srcAbs)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return addFileToStdZip(ctx, zw, srcAbs, filepath.ToSlash(entryName), info, store)
-	}
-	root := srcAbs
-	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(filepath.Dir(root), path)
-		if err != nil {
-			return err
-		}
-		zipName := filepath.ToSlash(rel)
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if zipName != "" && !strings.HasSuffix(zipName, "/") {
-				zipName += "/"
-			}
-			hdr, err := stdzip.FileInfoHeader(info)
-			if err != nil {
-				return err
-			}
-			hdr.Name = zipName
-			_, err = zw.CreateHeader(hdr)
-			return err
-		}
-		return addFileToStdZip(ctx, zw, path, zipName, info, store)
-	})
 }
 
 func addFileToStdZip(ctx context.Context, zw *stdzip.Writer, absPath, zipName string, info os.FileInfo, store bool) error {
@@ -1191,46 +1170,30 @@ func addFileToStdZip(ctx context.Context, zw *stdzip.Writer, absPath, zipName st
 	return err
 }
 
-func addPathToZip(ctx context.Context, zw *zip.Writer, srcAbs, entryName string, store bool, password string) error {
-	srcAbs = filepath.Clean(srcAbs)
-	info, err := os.Stat(srcAbs)
-	if err != nil {
+func writeStdZipEntry(ctx context.Context, zw *stdzip.Writer, entry localBrowserZipEntry, store bool) error {
+	if entry.isDir {
+		hdr, err := stdzip.FileInfoHeader(entry.info)
+		if err != nil {
+			return err
+		}
+		hdr.Name = ensureLocalZipDirName(entry.zipName)
+		_, err = zw.CreateHeader(hdr)
 		return err
 	}
-	if !info.IsDir() {
-		return addFileToZip(ctx, zw, srcAbs, filepath.ToSlash(entryName), info, store, password)
+	return addFileToStdZip(ctx, zw, entry.absPath, entry.zipName, entry.info, store)
+}
+
+func writeEncryptedZipEntry(ctx context.Context, zw *zip.Writer, entry localBrowserZipEntry, store bool, password string) error {
+	if entry.isDir {
+		hdr, err := zip.FileInfoHeader(entry.info)
+		if err != nil {
+			return err
+		}
+		hdr.Name = ensureLocalZipDirName(entry.zipName)
+		_, err = zw.CreateHeader(hdr)
+		return err
 	}
-	root := srcAbs
-	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(filepath.Dir(root), path)
-		if err != nil {
-			return err
-		}
-		zipName := filepath.ToSlash(rel)
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if zipName != "" && !strings.HasSuffix(zipName, "/") {
-				zipName += "/"
-			}
-			hdr, err := zip.FileInfoHeader(info)
-			if err != nil {
-				return err
-			}
-			hdr.Name = zipName
-			_, err = zw.CreateHeader(hdr)
-			return err
-		}
-		return addFileToZip(ctx, zw, path, zipName, info, store, password)
-	})
+	return addFileToZip(ctx, zw, entry.absPath, entry.zipName, entry.info, store, password)
 }
 
 func addFileToZip(ctx context.Context, zw *zip.Writer, absPath, zipName string, info os.FileInfo, store bool, password string) error {
@@ -1262,6 +1225,111 @@ func addFileToZip(ctx context.Context, zw *zip.Writer, absPath, zipName string, 
 	return err
 }
 
+func collectLocalZipEntries(ctx context.Context, srcAbs []string, srcNames []string) ([]localBrowserZipEntry, []string, error) {
+	entries := make([]localBrowserZipEntry, 0, len(srcAbs))
+	warnings := make([]string, 0, 8)
+	for i, src := range srcAbs {
+		if ctx.Err() != nil {
+			return nil, warnings, ctx.Err()
+		}
+		collected, collectedWarnings, err := collectLocalZipEntriesForPath(ctx, src, srcNames[i])
+		if err != nil {
+			return nil, warnings, err
+		}
+		entries = append(entries, collected...)
+		warnings = append(warnings, collectedWarnings...)
+	}
+	return entries, warnings, nil
+}
+
+func collectLocalZipEntriesForPath(ctx context.Context, srcAbs, entryName string) ([]localBrowserZipEntry, []string, error) {
+	srcAbs = filepath.Clean(srcAbs)
+	info, err := os.Lstat(srcAbs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if info.IsDir() {
+		return collectLocalZipEntriesFromDir(ctx, srcAbs)
+	}
+	entry, warning, ok := buildLocalZipFileEntry(srcAbs, filepath.ToSlash(entryName), info)
+	if !ok {
+		return nil, []string{warning}, nil
+	}
+	return []localBrowserZipEntry{entry}, nil, nil
+}
+
+func collectLocalZipEntriesFromDir(ctx context.Context, rootAbs string) ([]localBrowserZipEntry, []string, error) {
+	entries := make([]localBrowserZipEntry, 0, 16)
+	warnings := make([]string, 0, 8)
+	parentAbs := filepath.Dir(rootAbs)
+	err := filepath.WalkDir(rootAbs, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		rel, err := filepath.Rel(parentAbs, path)
+		if err != nil {
+			return err
+		}
+		zipName := filepath.ToSlash(rel)
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			entries = append(entries, localBrowserZipEntry{
+				absPath: path,
+				zipName: zipName,
+				info:    info,
+				isDir:   true,
+			})
+			return nil
+		}
+		entry, warning, ok := buildLocalZipFileEntry(path, zipName, info)
+		if !ok {
+			warnings = append(warnings, warning)
+			return nil
+		}
+		entries = append(entries, entry)
+		return nil
+	})
+	if err != nil {
+		return nil, warnings, err
+	}
+	return entries, warnings, nil
+}
+
+func buildLocalZipFileEntry(absPath, zipName string, info os.FileInfo) (localBrowserZipEntry, string, bool) {
+	mode := info.Mode()
+	switch {
+	case mode&os.ModeSymlink != 0:
+		return localBrowserZipEntry{}, fmt.Sprintf("skip %s: symlink is not supported", zipName), false
+	case mode&os.ModeSocket != 0:
+		return localBrowserZipEntry{}, fmt.Sprintf("skip %s: socket file is not supported", zipName), false
+	case mode&os.ModeNamedPipe != 0:
+		return localBrowserZipEntry{}, fmt.Sprintf("skip %s: named pipe is not supported", zipName), false
+	case mode&os.ModeDevice != 0:
+		return localBrowserZipEntry{}, fmt.Sprintf("skip %s: device file is not supported", zipName), false
+	case !mode.IsRegular():
+		return localBrowserZipEntry{}, fmt.Sprintf("skip %s: unsupported file type", zipName), false
+	default:
+		return localBrowserZipEntry{
+			absPath: absPath,
+			zipName: zipName,
+			info:    info,
+		}, "", true
+	}
+}
+
+func ensureLocalZipDirName(name string) string {
+	if name != "" && !strings.HasSuffix(name, "/") {
+		return name + "/"
+	}
+	return name
+}
+
 func extractLocalZipArchive(ctx context.Context, archiveAbs, dstAbs, password string) ([]string, error) {
 	reader, err := zip.OpenReader(archiveAbs)
 	if err != nil {
@@ -1290,6 +1358,10 @@ func extractLocalZipArchiveEntries(ctx context.Context, files []*zip.File, dstAb
 	warnings := make([]string, 0, 4)
 	for _, f := range files {
 		if err := extractSingleLocalZipEntry(ctx, f, dstAbs, password); err != nil {
+			if localBrowserIsSkipWarning(err) {
+				warnings = append(warnings, err.Error())
+				continue
+			}
 			if isArchiveTruncatedOrCorrupted(err) {
 				warnings = append(warnings, fmt.Sprintf("skip %s: archive entry is incomplete/corrupted", f.Name))
 				continue
@@ -1318,8 +1390,8 @@ func extractSingleLocalZipEntry(ctx context.Context, f *zip.File, dstAbs, passwo
 		return nil
 	}
 	mode := f.Mode()
-	if mode&os.ModeSymlink != 0 {
-		return errors.Errorf("unsupported symlink entry: %s", f.Name)
+	if warning, skip := localBrowserExtractUnsupportedTypeWarning(f.Name, mode); skip {
+		return errors.New(warning)
 	}
 	if err := os.MkdirAll(filepath.Dir(cleanTarget), 0o755); err != nil {
 		return err
