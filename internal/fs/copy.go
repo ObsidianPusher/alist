@@ -366,8 +366,10 @@ func copyOrMoveAsTask(ctx context.Context, srcObjPath, dstDirPath string, operat
 		if isSameStorage(srcStorage, dstStorage) {
 			return nil, op.Move(ctx, srcStorage, srcObjActualPath, dstDirActualPath, lazyCache...)
 		}
-		switch resolveMoveStrategy(srcStorage, dstStorage) {
-		case moveStrategyCrossLocalStorages:
+		if resolveMoveStrategy(srcStorage, dstStorage) == moveStrategyCrossLocalStorages {
+			if err := ensureCrossStorageMoveAllowed(ctx, srcStorage, dstStorage, srcObjActualPath, dstDirActualPath); err != nil {
+				return nil, err
+			}
 			if ctx.Value(conf.NoTaskKey) == nil {
 				t := buildCrossStorageTask(ctx, srcStorage, dstStorage, srcObjActualPath, dstDirActualPath, operation)
 				manager := selectCrossStorageTaskManager(srcStorage, dstStorage)
@@ -469,7 +471,7 @@ func copyDirBetween2Storages(t *CopyTask, srcStorage, dstStorage driver.Driver, 
 		return errors.WithMessagef(err, "failed make destination dir [%s]", dstDirPath)
 	}
 	t.Status = fmt.Sprintf("%s: listing source dir %s", t.operation(), srcDirPath)
-	objs, err := op.List(t.Ctx(), srcStorage, srcDirPath, model.ListArgs{})
+	objs, err := listTransferSourceDir(t.Ctx(), srcStorage, srcDirPath)
 	if err != nil {
 		return errors.WithMessagef(err, "failed list src [%s] objs", srcDirPath)
 	}
@@ -501,6 +503,10 @@ func copyDirBetween2Storages(t *CopyTask, srcStorage, dstStorage driver.Driver, 
 		}
 	}
 	return nil
+}
+
+func listTransferSourceDir(ctx context.Context, storage driver.Driver, dirPath string) ([]model.Obj, error) {
+	return op.List(ctx, storage, dirPath, model.ListArgs{Refresh: true})
 }
 
 func copyFileObjBetween2Storages(tsk *CopyTask, srcStorage, dstStorage driver.Driver, srcFile model.Obj, srcFilePath, dstDirPath string) error {
@@ -577,7 +583,7 @@ func estimateObjBytes(ctx context.Context, storage driver.Driver, obj model.Obj,
 		}
 		return obj.GetSize(), nil
 	}
-	children, err := op.List(ctx, storage, objPath, model.ListArgs{})
+	children, err := listTransferSourceDir(ctx, storage, objPath)
 	if err != nil {
 		return 0, err
 	}

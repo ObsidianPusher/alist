@@ -16,12 +16,18 @@ import {
   notify,
   pathJoin,
 } from "~/utils"
+import {
+  REQUEST_CANCELED_CODE,
+  REQUEST_CANCELED_MESSAGE,
+} from "~/utils/request"
 import { useFetch } from "./useFetch"
 import { useRouter } from "./useRouter"
 
 let first_fetch = true
 
 let cancelList: Canceler
+let activeListRequestId = 0
+let activeObjectRequestId = 0
 export function addOrUpdateQuery(
   key: string,
   value: any,
@@ -68,6 +74,10 @@ let globalPage = 1
 
 type FolderLoadResult = Awaited<ReturnType<typeof listFsObjects>>["data"]
 type ObjectLoadResult = Awaited<ReturnType<typeof getFsObject>>["data"]
+
+const isCanceledResponse = (msg: string, code?: number) => {
+  return code === REQUEST_CANCELED_CODE || msg === REQUEST_CANCELED_MESSAGE
+}
 
 export const getGlobalPage = () => {
   return globalPage
@@ -140,14 +150,21 @@ export const usePath = () => {
 
   // handle enter obj that don't know if it is dir or file
   const handleObj = async (path: string) => {
+    const requestId = ++activeObjectRequestId
     ObjStore.setState(State.FetchingObj)
     const resp = await getObj(path)
     handleRespWithoutNotify(
       resp,
       (data) => {
+        if (requestId !== activeObjectRequestId) return
         applyObjectResult(path, data)
       },
-      handleErr,
+      (msg, code) => {
+        if (requestId !== activeObjectRequestId || isCanceledResponse(msg, code)) {
+          return
+        }
+        handleErr(msg, code)
+      },
     )
   }
 
@@ -196,6 +213,7 @@ export const usePath = () => {
     append = false,
     force?: boolean,
   ) => {
+    const requestId = ++activeListRequestId
     if (!size) {
       size = pagination.size
     }
@@ -208,9 +226,15 @@ export const usePath = () => {
     handleRespWithoutNotify(
       resp,
       (data) => {
+        if (requestId !== activeListRequestId) return
         applyFolderResult(path, data, append, index)
       },
-      handleErr,
+      (msg, code) => {
+        if (requestId !== activeListRequestId || isCanceledResponse(msg, code)) {
+          return
+        }
+        handleErr(msg, code)
+      },
     )
   }
 

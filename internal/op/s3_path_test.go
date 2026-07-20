@@ -9,6 +9,7 @@ import (
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/db"
 	"github.com/alist-org/alist/v3/internal/model"
+	_ "github.com/alist-org/alist/v3/drivers/local"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -22,7 +23,7 @@ func init() {
 	db.Init(dB)
 }
 
-func TestResolveBucketLocalPathUsesShortestMatchingMount(t *testing.T) {
+func TestResolveBucketLocalPathUsesLongestMatchingMount(t *testing.T) {
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(rootA, "data", "deep"), 0o755); err != nil {
@@ -50,7 +51,7 @@ func TestResolveBucketLocalPathUsesShortestMatchingMount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve path: %v", err)
 	}
-	want := filepath.Join(rootA, "data", "deep", "note.txt")
+	want := filepath.Join(rootB, "deep", "note.txt")
 	if got != want {
 		t.Fatalf("unexpected resolved path: got %q want %q", got, want)
 	}

@@ -228,8 +228,7 @@ func localBrowserExtractTaskManager() *tache.Manager[*localBrowserExtractTask] {
 		localBrowserExtractDoneTaskCleanup = task.StartDoneTaskCleanup(localBrowserExtractTaskManagerInst, task.DoneTaskCleanupConfig{
 			Name:      "local_browser_extract",
 			Interval:  5 * time.Minute,
-			Retention: 6 * time.Hour,
-			MaxDone:   100,
+			Retention: 7 * 24 * time.Hour,
 		}, func(t *localBrowserExtractTask) int64 {
 			return t.GetFinishedAtUnix()
 		})
@@ -251,8 +250,7 @@ func localBrowserCompressTaskManager() *tache.Manager[*localBrowserCompressTask]
 		localBrowserCompressDoneTaskCleanup = task.StartDoneTaskCleanup(localBrowserCompressTaskManagerInst, task.DoneTaskCleanupConfig{
 			Name:      "local_browser_compress",
 			Interval:  5 * time.Minute,
-			Retention: 6 * time.Hour,
-			MaxDone:   100,
+			Retention: 7 * 24 * time.Hour,
 		}, func(t *localBrowserCompressTask) int64 {
 			return t.GetFinishedAtUnix()
 		})

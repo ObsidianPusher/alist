@@ -270,6 +270,9 @@ func putAsTask(ctx context.Context, dstDirPath string, file model.FileStreamer) 
 	if isBaiduStorageDriver(storage) && BaiduUploadTaskManager != nil {
 		manager = BaiduUploadTaskManager
 	}
+	if manager == nil {
+		return nil, errors.New("upload task manager is not initialized")
+	}
 	manager.Add(t)
 	return t, nil
 }

@@ -6,8 +6,13 @@ import { dynamicBase } from "vite-plugin-dynamic-base"
 
 export default defineConfig({
   resolve: {
+    dedupe: ["solid-js"],
     alias: {
       "~": path.resolve(__dirname, "src"),
+      "solid-js": path.resolve(__dirname, "node_modules/solid-js"),
+      "solid-js/web": path.resolve(__dirname, "node_modules/solid-js/web"),
+      "solid-js/store": path.resolve(__dirname, "node_modules/solid-js/store"),
+      "solid-js/universal": path.resolve(__dirname, "node_modules/solid-js/universal"),
       "@solidjs/router": path.resolve(__dirname, "solid-router/src"),
     },
   },

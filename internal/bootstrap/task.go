@@ -20,8 +20,8 @@ const (
 	defaultBaiduTaskWorkers      = 1
 	defaultBaiduTaskMaxRetry     = 3
 	defaultBaiduDownloadMaxRetry = 3
-	defaultTaskMaxDone           = 100
 	defaultTaskPersistDebounce   = time.Second
+	doneTaskRetention            = 7 * 24 * time.Hour
 )
 
 func InitTaskManager() {
@@ -69,35 +69,31 @@ func InitTaskManager() {
 	fs.UploadDoneTaskCleanup = taskx.StartDoneTaskCleanup(fs.UploadTaskManager, taskx.DoneTaskCleanupConfig{
 		Name:      "upload",
 		Interval:  5 * time.Minute,
-		Retention: 4 * time.Hour,
-		MaxDone:   defaultTaskMaxDone,
+		Retention: doneTaskRetention,
 	}, func(t *fs.UploadTask) int64 {
 		return t.GetFinishedAtUnix()
 	})
 	fs.BaiduUploadDoneTaskCleanup = taskx.StartDoneTaskCleanup(fs.BaiduUploadTaskManager, taskx.DoneTaskCleanupConfig{
 		Name:      "baidu_upload",
 		Interval:  5 * time.Minute,
-		Retention: 6 * time.Hour,
-		MaxDone:   defaultTaskMaxDone,
+		Retention: doneTaskRetention,
 	}, func(t *fs.UploadTask) int64 {
 		return t.GetFinishedAtUnix()
 	})
 	for _, cfg := range []struct {
 		name    string
 		manager *tache.Manager[*fs.CopyTask]
-		maxDone int
 		assign  func(taskx.DoneTaskCleanupTrigger)
 	}{
-		{name: "copy", manager: fs.CopyTaskManager, maxDone: defaultTaskMaxDone, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.CopyDoneTaskCleanup = trigger }},
-		{name: "baidu_copy_download", manager: fs.BaiduDownloadCopyTaskManager, maxDone: defaultTaskMaxDone, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduDownloadCopyDoneTaskCleanup = trigger }},
-		{name: "baidu_copy_upload", manager: fs.BaiduUploadCopyTaskManager, maxDone: defaultTaskMaxDone, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduUploadCopyDoneTaskCleanup = trigger }},
-		{name: "baidu_copy_legacy", manager: fs.BaiduCopyTaskManager, maxDone: defaultTaskMaxDone, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduCopyDoneTaskCleanup = trigger }},
+		{name: "copy", manager: fs.CopyTaskManager, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.CopyDoneTaskCleanup = trigger }},
+		{name: "baidu_copy_download", manager: fs.BaiduDownloadCopyTaskManager, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduDownloadCopyDoneTaskCleanup = trigger }},
+		{name: "baidu_copy_upload", manager: fs.BaiduUploadCopyTaskManager, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduUploadCopyDoneTaskCleanup = trigger }},
+		{name: "baidu_copy_legacy", manager: fs.BaiduCopyTaskManager, assign: func(trigger taskx.DoneTaskCleanupTrigger) { fs.BaiduCopyDoneTaskCleanup = trigger }},
 	} {
 		trigger := taskx.StartDoneTaskCleanup(cfg.manager, taskx.DoneTaskCleanupConfig{
 			Name:      cfg.name,
 			Interval:  5 * time.Minute,
-			Retention: 12 * time.Hour,
-			MaxDone:   cfg.maxDone,
+			Retention: doneTaskRetention,
 		}, func(t *fs.CopyTask) int64 {
 			return t.GetFinishedAtUnix()
 		})

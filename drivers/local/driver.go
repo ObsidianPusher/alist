@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alist-org/alist/v3/internal/conf"
@@ -36,6 +37,9 @@ type Local struct {
 	thumbConcurrency int
 	thumbTokenBucket TokenBucket
 }
+
+var _ driver.BackendPathResolver = (*Local)(nil)
+var _ driver.Driver = (*Local)(nil)
 
 func (d *Local) Config() driver.Config {
 	return config
@@ -254,7 +258,7 @@ func (d *Local) Move(ctx context.Context, srcObj, dstDir model.Obj) error {
 	if utils.IsSubPath(srcPath, dstPath) {
 		return fmt.Errorf("the destination folder is a subfolder of the source folder")
 	}
-	if err := os.Rename(srcPath, dstPath); err != nil && strings.Contains(err.Error(), "invalid cross-device link") {
+	if err := os.Rename(srcPath, dstPath); err != nil && (errors.Is(err, syscall.EXDEV) || strings.Contains(err.Error(), "invalid cross-device link")) {
 		// Handle cross-device file move in local driver
 		if err = d.Copy(ctx, srcObj, dstDir); err != nil {
 			return err
@@ -321,10 +325,8 @@ func (d *Local) Put(ctx context.Context, dstDir model.Obj, stream model.FileStre
 	fullPath := filepath.Join(dstDir.GetPath(), stream.GetName())
 	out, err := os.Create(fullPath)
 	if err != nil {
-	return err
-}
-
-var _ driver.BackendPathResolver = (*Local)(nil)
+		return err
+	}
 	defer func() {
 		_ = out.Close()
 		if errors.Is(err, context.Canceled) {
@@ -341,5 +343,3 @@ var _ driver.BackendPathResolver = (*Local)(nil)
 	}
 	return nil
 }
-
-var _ driver.Driver = (*Local)(nil)

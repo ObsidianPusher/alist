@@ -18,7 +18,15 @@ type ListArgs struct {
 	NoLog   bool
 }
 
+func normalizeListArgs(args *ListArgs) *ListArgs {
+	if args != nil {
+		return args
+	}
+	return &ListArgs{}
+}
+
 func List(ctx context.Context, path string, args *ListArgs) ([]model.Obj, error) {
+	args = normalizeListArgs(args)
 	res, err := list(ctx, path, args)
 	if err != nil {
 		if !args.NoLog {
@@ -33,7 +41,15 @@ type GetArgs struct {
 	NoLog bool
 }
 
+func normalizeGetArgs(args *GetArgs) *GetArgs {
+	if args != nil {
+		return args
+	}
+	return &GetArgs{}
+}
+
 func Get(ctx context.Context, path string, args *GetArgs) (model.Obj, error) {
+	args = normalizeGetArgs(args)
 	res, err := get(ctx, path)
 	if err != nil {
 		if !args.NoLog {

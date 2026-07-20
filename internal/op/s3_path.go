@@ -28,7 +28,7 @@ func ResolveBucketLocalPath(rawPath string) (string, error) {
 		}
 	}
 
-	if storage, mountPath, ok := getShortestMatchingStorage(cleaned); ok {
+	if storage, mountPath, ok := getLongestMatchingStorage(cleaned); ok {
 		if !storage.Config().OnlyLocal {
 			return "", fmt.Errorf("storage %q must be local storage", mountPath)
 		}
@@ -98,7 +98,7 @@ func NormalizeS3BucketMappings(raw string) (string, bool, error) {
 	return string(out), changed || string(out) != raw, nil
 }
 
-func getShortestMatchingStorage(path string) (driver.Driver, string, bool) {
+func getLongestMatchingStorage(path string) (driver.Driver, string, bool) {
 	path = utils.FixAndCleanPath(path)
 	var (
 		chosen     driver.Driver
@@ -109,7 +109,7 @@ func getShortestMatchingStorage(path string) (driver.Driver, string, bool) {
 		if !utils.IsSubPath(mountPath, path) {
 			continue
 		}
-		if chosen == nil || len(mountPath) < len(chosenPath) || (len(mountPath) == len(chosenPath) && mountPath < chosenPath) {
+		if chosen == nil || len(mountPath) > len(chosenPath) || (len(mountPath) == len(chosenPath) && mountPath < chosenPath) {
 			chosen = storage
 			chosenPath = mountPath
 		}

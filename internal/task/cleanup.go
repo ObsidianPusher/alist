@@ -1,7 +1,6 @@
 package task
 
 import (
-	"sort"
 	"time"
 
 	"github.com/alist-org/alist/v3/pkg/utils"
@@ -12,13 +11,12 @@ type DoneTaskCleanupConfig struct {
 	Name      string
 	Interval  time.Duration
 	Retention time.Duration
-	MaxDone   int
+	MaxDone   int // Deprecated: no longer used. Done tasks are cleaned only by retention.
 }
 
 const (
 	defaultDoneTaskCleanupInterval = 5 * time.Minute
-	defaultDoneTaskRetention       = 6 * time.Hour
-	defaultDoneTaskMaxCount        = 2000
+	defaultDoneTaskRetention       = 7 * 24 * time.Hour
 )
 
 type DoneTaskCleanupTrigger func()
@@ -31,6 +29,10 @@ type createdAtProvider interface {
 	GetCreatedAtUnix() int64
 }
 
+type groupIDProvider interface {
+	GetGroupID() string
+}
+
 func normalizeDoneTaskCleanupConfig(cfg DoneTaskCleanupConfig) DoneTaskCleanupConfig {
 	if cfg.Name == "" {
 		cfg.Name = "task"
@@ -40,9 +42,6 @@ func normalizeDoneTaskCleanupConfig(cfg DoneTaskCleanupConfig) DoneTaskCleanupCo
 	}
 	if cfg.Retention <= 0 {
 		cfg.Retention = defaultDoneTaskRetention
-	}
-	if cfg.MaxDone <= 0 {
-		cfg.MaxDone = defaultDoneTaskMaxCount
 	}
 	return cfg
 }
@@ -72,6 +71,17 @@ func cleanupDoneTasks[T tache.Task](manager *tache.Manager[T], cfg DoneTaskClean
 		return
 	}
 	now := time.Now().Unix()
+	activeGroups := make(map[string]struct{})
+	for _, t := range manager.GetByCondition(func(task T) bool {
+		return !isDoneState(task.GetState())
+	}) {
+		if provider, ok := any(t).(groupIDProvider); ok {
+			groupID := provider.GetGroupID()
+			if groupID != "" {
+				activeGroups[groupID] = struct{}{}
+			}
+		}
+	}
 
 	done := manager.GetByCondition(func(task T) bool {
 		return isDoneState(task.GetState())
@@ -83,19 +93,37 @@ func cleanupDoneTasks[T tache.Task](manager *tache.Manager[T], cfg DoneTaskClean
 	type doneTaskMeta struct {
 		id       string
 		finished int64
+		groupID  string
 	}
 	metas := make([]doneTaskMeta, 0, len(done))
 	for _, t := range done {
+		groupID := ""
+		if provider, ok := any(t).(groupIDProvider); ok {
+			groupID = provider.GetGroupID()
+		}
 		metas = append(metas, doneTaskMeta{
 			id:       t.GetID(),
 			finished: resolveDoneTaskTime(t, finishedAtUnix),
+			groupID:  groupID,
 		})
 	}
 
 	removeIDs := make(map[string]struct{})
 	if cfg.Retention > 0 {
 		retentionSeconds := int64(cfg.Retention / time.Second)
+		groupMetas := make(map[string][]doneTaskMeta)
+		groupFinishedAt := make(map[string]int64)
 		for _, meta := range metas {
+			if _, keep := activeGroups[meta.groupID]; keep {
+				continue
+			}
+			if meta.groupID != "" {
+				groupMetas[meta.groupID] = append(groupMetas[meta.groupID], meta)
+				if meta.finished > groupFinishedAt[meta.groupID] {
+					groupFinishedAt[meta.groupID] = meta.finished
+				}
+				continue
+			}
 			if meta.finished <= 0 {
 				continue
 			}
@@ -103,33 +131,17 @@ func cleanupDoneTasks[T tache.Task](manager *tache.Manager[T], cfg DoneTaskClean
 				removeIDs[meta.id] = struct{}{}
 			}
 		}
-	}
-
-	remaining := metas[:0]
-	for _, meta := range metas {
-		if _, removed := removeIDs[meta.id]; removed {
-			continue
-		}
-		remaining = append(remaining, meta)
-	}
-	if cfg.MaxDone > 0 && len(remaining) > cfg.MaxDone {
-		sort.Slice(remaining, func(i, j int) bool {
-			fi := remaining[i].finished
-			fj := remaining[j].finished
-			if fi == fj {
-				return remaining[i].id < remaining[j].id
+		for groupID, members := range groupMetas {
+			groupFinished := groupFinishedAt[groupID]
+			if groupFinished <= 0 {
+				continue
 			}
-			if fi <= 0 {
-				return true
+			if now-groupFinished < retentionSeconds {
+				continue
 			}
-			if fj <= 0 {
-				return false
+			for _, member := range members {
+				removeIDs[member.id] = struct{}{}
 			}
-			return fi < fj
-		})
-		removeCount := len(remaining) - cfg.MaxDone
-		for i := 0; i < removeCount; i++ {
-			removeIDs[remaining[i].id] = struct{}{}
 		}
 	}
 	for id := range removeIDs {

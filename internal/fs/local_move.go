@@ -13,9 +13,12 @@ import (
 	"github.com/alist-org/alist/v3/pkg/utils"
 	cp "github.com/otiai10/copy"
 	"github.com/pkg/errors"
+	"github.com/shirou/gopsutil/v3/disk"
 )
 
 const localDriverName = "Local"
+
+var localDiskUsage = disk.Usage
 
 type moveStrategy uint8
 
@@ -112,4 +115,68 @@ func moveBetweenLocalStorages(ctx context.Context, srcStorage, dstStorage driver
 		op.ClearCache(dstStorage, dstDirActualPath)
 	}
 	return nil
+}
+
+func ensureCrossStorageMoveAllowed(ctx context.Context, srcStorage, dstStorage driver.Driver, srcActualPath, dstDirActualPath string) error {
+	if resolveMoveStrategy(srcStorage, dstStorage) != moveStrategyCrossLocalStorages {
+		return errors.New("cross-storage move only supports local storages")
+	}
+	requiredBytes, err := estimateMoveRequiredBytes(ctx, srcStorage, srcActualPath)
+	if err != nil {
+		return err
+	}
+	return ensureLocalMoveCapacity(dstStorage, dstDirActualPath, requiredBytes)
+}
+
+func estimateMoveRequiredBytes(ctx context.Context, srcStorage driver.Driver, srcActualPath string) (int64, error) {
+	srcObj, err := op.Get(ctx, srcStorage, srcActualPath)
+	if err != nil {
+		return 0, errors.WithMessagef(err, "failed get src [%s] file", srcActualPath)
+	}
+	return estimateObjBytes(ctx, srcStorage, srcObj, srcActualPath)
+}
+
+func ensureLocalMoveCapacity(dstStorage driver.Driver, dstDirActualPath string, requiredBytes int64) error {
+	if requiredBytes <= 0 {
+		return nil
+	}
+	dstRoot, err := getLocalRoot(dstStorage)
+	if err != nil {
+		return err
+	}
+	usagePath, err := findExistingLocalUsagePath(dstRoot, dstDirActualPath)
+	if err != nil {
+		return err
+	}
+	usage, err := localDiskUsage(usagePath)
+	if err != nil {
+		return err
+	}
+	if usage == nil {
+		return errors.New("failed to get destination disk usage")
+	}
+	if usage.Free < uint64(requiredBytes) {
+		return errors.Errorf("insufficient free space in destination local storage: need %d bytes, have %d bytes", requiredBytes, usage.Free)
+	}
+	return nil
+}
+
+func findExistingLocalUsagePath(root, actualPath string) (string, error) {
+	cur := filepath.Clean(filepath.Join(root, actualPath))
+	root = filepath.Clean(root)
+	for {
+		if _, err := os.Stat(cur); err == nil {
+			return cur, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		if cur == root {
+			return root, nil
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return root, nil
+		}
+		cur = parent
+	}
 }

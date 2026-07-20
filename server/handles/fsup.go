@@ -186,6 +186,9 @@ func FsForm(c *gin.Context) {
 			common.ErrorResp(c, err, 500)
 			return
 		}
+		if t == nil {
+			continue
+		}
 		if groupID != "" {
 			t.SetGroupID(groupID)
 		}

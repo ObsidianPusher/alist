@@ -106,8 +106,13 @@ export function Sidebar() {
     const media = window.matchMedia("(max-width: 1024px)")
     const update = () => setIsNarrowViewport(media.matches)
     update()
-    media.addEventListener("change", update)
-    onCleanup(() => media.removeEventListener("change", update))
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", update)
+      onCleanup(() => media.removeEventListener("change", update))
+      return
+    }
+    media.addListener(update)
+    onCleanup(() => media.removeListener(update))
   })
 
   const visible = createMemo(

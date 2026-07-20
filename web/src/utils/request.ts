@@ -5,6 +5,8 @@ import { api, log } from "."
 const NETWORK_ERROR_CODE = 500
 const defaultNetworkErrorMessage = "network request failed"
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30000
+export const REQUEST_CANCELED_CODE = -1
+export const REQUEST_CANCELED_MESSAGE = "canceled"
 type HeaderBag = AxiosResponseHeaders | AxiosHeaders | Record<string, unknown>
 
 const instance = axios.create({
@@ -92,6 +94,13 @@ instance.interceptors.response.use(
   }) as any,
   ((error: any) => {
     console.error(error)
+    if (axios.isCancel(error)) {
+      return {
+        code: REQUEST_CANCELED_CODE,
+        message: REQUEST_CANCELED_MESSAGE,
+        data: null,
+      }
+    }
     const status = error?.response?.status ?? 500
     const requestId = getHeaderValue(error?.response?.headers, "x-request-id")
     const responseData = error?.response?.data as
