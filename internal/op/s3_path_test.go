@@ -1,4 +1,4 @@
-package op
+package op_test
 
 import (
 	"context"
@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	_ "github.com/alist-org/alist/v3/drivers/local"
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/db"
 	"github.com/alist-org/alist/v3/internal/model"
-	_ "github.com/alist-org/alist/v3/drivers/local"
+	"github.com/alist-org/alist/v3/internal/op"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -40,14 +41,14 @@ func TestResolveBucketLocalPathUsesLongestMatchingMount(t *testing.T) {
 		MountPath: "/b/data",
 		Addition:  `{"root_folder_path":"` + rootB + `","thumbnail":false,"show_hidden":true,"mkdir_perm":"777","thumb_concurrency":"1","recycle_bin_path":"delete permanently"}`,
 	}
-	if _, err := CreateStorage(context.Background(), storageA); err != nil {
+	if _, err := op.CreateStorage(context.Background(), storageA); err != nil {
 		t.Fatalf("create storage a: %v", err)
 	}
-	if _, err := CreateStorage(context.Background(), storageB); err != nil {
+	if _, err := op.CreateStorage(context.Background(), storageB); err != nil {
 		t.Fatalf("create storage b: %v", err)
 	}
 
-	got, err := ResolveBucketLocalPath("/b/data/deep/note.txt")
+	got, err := op.ResolveBucketLocalPath("/b/data/deep/note.txt")
 	if err != nil {
 		t.Fatalf("resolve path: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestResolveBucketLocalPathKeepsAbsolutePathUnchanged(t *testing.T) {
 		MountPath: "/mnt",
 		Addition:  `{"root_folder_path":"` + root + `","thumbnail":false,"show_hidden":true,"mkdir_perm":"777","thumb_concurrency":"1","recycle_bin_path":"delete permanently"}`,
 	}
-	if _, err := CreateStorage(context.Background(), storage); err != nil {
+	if _, err := op.CreateStorage(context.Background(), storage); err != nil {
 		t.Fatalf("create storage: %v", err)
 	}
 
@@ -72,7 +73,7 @@ func TestResolveBucketLocalPathKeepsAbsolutePathUnchanged(t *testing.T) {
 	if err := os.MkdirAll(absPath, 0o755); err != nil {
 		t.Fatalf("mkdir abs path: %v", err)
 	}
-	got, err := ResolveBucketLocalPath(absPath)
+	got, err := op.ResolveBucketLocalPath(absPath)
 	if err != nil {
 		t.Fatalf("resolve absolute path: %v", err)
 	}

@@ -222,6 +222,16 @@ func selectUploadDoneTaskCleanupByMountPath(mountPath string) task.DoneTaskClean
 	return func() {}
 }
 
+func cleanupUploadTaskSetupFailure(file model.FileStreamer) {
+	if file == nil {
+		return
+	}
+	if keepTempFile, ok := file.(interface{ SetKeepTempFile(bool) }); ok {
+		keepTempFile.SetKeepTempFile(false)
+	}
+	_ = file.Close()
+}
+
 // putAsTask add as a put task and return immediately
 func putAsTask(ctx context.Context, dstDirPath string, file model.FileStreamer) (task.TaskInfoWithCreator, error) {
 	storage, dstDirActualPath, err := op.GetStorageAndActualPath(dstDirPath)
@@ -246,6 +256,7 @@ func putAsTask(ctx context.Context, dstDirPath string, file model.FileStreamer) 
 		tempFilePath = namedTempFile.Name()
 	}
 	if tempFilePath == "" {
+		cleanupUploadTaskSetupFailure(file)
 		return nil, errors.New("failed to resolve temp file path for upload task")
 	}
 	taskCreator, _ := ctx.Value("user").(*model.User) // taskCreator is nil when convert failed
@@ -271,6 +282,7 @@ func putAsTask(ctx context.Context, dstDirPath string, file model.FileStreamer) 
 		manager = BaiduUploadTaskManager
 	}
 	if manager == nil {
+		cleanupUploadTaskSetupFailure(file)
 		return nil, errors.New("upload task manager is not initialized")
 	}
 	manager.Add(t)

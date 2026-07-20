@@ -95,6 +95,15 @@ func (t *CopyTask) Run() (err error) {
 	if err != nil {
 		return errors.WithMessage(err, "failed get storage")
 	}
+	if t.isMove() && resolveMoveStrategy(t.srcStorage, t.dstStorage) == moveStrategyCrossLocalStorages {
+		t.DstObjPath = stdpath.Join(t.DstDirPath, stdpath.Base(t.SrcObjPath))
+		t.Persist()
+		if err := moveBetweenLocalStorages(t.Ctx(), t.srcStorage, t.dstStorage, t.SrcObjPath, t.DstDirPath, false); err != nil {
+			return err
+		}
+		task.SetProgressIfChanged(&t.Base, 100, 0)
+		return nil
+	}
 	if err := copyBetween2Storages(t, t.srcStorage, t.dstStorage, t.SrcObjPath, t.DstDirPath); err != nil {
 		return err
 	}
@@ -367,9 +376,6 @@ func copyOrMoveAsTask(ctx context.Context, srcObjPath, dstDirPath string, operat
 			return nil, op.Move(ctx, srcStorage, srcObjActualPath, dstDirActualPath, lazyCache...)
 		}
 		if resolveMoveStrategy(srcStorage, dstStorage) == moveStrategyCrossLocalStorages {
-			if err := ensureCrossStorageMoveAllowed(ctx, srcStorage, dstStorage, srcObjActualPath, dstDirActualPath); err != nil {
-				return nil, err
-			}
 			if ctx.Value(conf.NoTaskKey) == nil {
 				t := buildCrossStorageTask(ctx, srcStorage, dstStorage, srcObjActualPath, dstDirActualPath, operation)
 				manager := selectCrossStorageTaskManager(srcStorage, dstStorage)

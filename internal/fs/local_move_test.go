@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/alist-org/alist/v3/internal/driver"
@@ -120,25 +121,7 @@ func TestIsSameStorageSupportsRemoteStorage(t *testing.T) {
 	require.False(t, isSameStorage(left, other))
 }
 
-func TestEnsureCrossStorageMoveAllowedRejectsNonLocalStorage(t *testing.T) {
-	t.Parallel()
-
-	local := &fakeMoveStorageDriver{
-		storage: model.Storage{ID: 1, MountPath: "/local", Driver: "Local"},
-		addition: driver.RootPath{
-			RootFolderPath: t.TempDir(),
-		},
-	}
-	remote := &fakeMoveStorageDriver{
-		storage: model.Storage{ID: 2, MountPath: "/crypt", Driver: "Crypt"},
-	}
-
-	err := ensureCrossStorageMoveAllowed(context.Background(), local, remote, "/src", "/dst")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "cross-storage move only supports local storages")
-}
-
-func TestEnsureCrossStorageMoveAllowedChecksDestinationFreeSpace(t *testing.T) {
+func TestMoveBetweenLocalStoragesSkipsCapacityCheckWhenRenameSucceeds(t *testing.T) {
 	srcRoot := t.TempDir()
 	dstRoot := t.TempDir()
 
@@ -149,17 +132,23 @@ func TestEnsureCrossStorageMoveAllowedChecksDestinationFreeSpace(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dstRoot, "target"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(srcRoot, "folder", "a.txt"), []byte("1234"), 0o644))
 
-	srcStorage, err := op.CreateStorage(context.Background(), model.Storage{
+	srcStorageID, err := op.CreateStorage(context.Background(), model.Storage{
 		MountPath: srcMount,
 		Driver:    "Local",
 		Addition:  `{"root_folder_path":"` + srcRoot + `"}`,
 	})
 	require.NoError(t, err)
-	dstStorage, err := op.CreateStorage(context.Background(), model.Storage{
+	dstStorageID, err := op.CreateStorage(context.Background(), model.Storage{
 		MountPath: dstMount,
 		Driver:    "Local",
 		Addition:  `{"root_folder_path":"` + dstRoot + `"}`,
 	})
+	require.NoError(t, err)
+	require.NotZero(t, srcStorageID)
+	require.NotZero(t, dstStorageID)
+	srcStorage, err := op.GetStorageByMountPath(srcMount)
+	require.NoError(t, err)
+	dstStorage, err := op.GetStorageByMountPath(dstMount)
 	require.NoError(t, err)
 
 	originalDiskUsage := localDiskUsage
@@ -170,7 +159,62 @@ func TestEnsureCrossStorageMoveAllowedChecksDestinationFreeSpace(t *testing.T) {
 		localDiskUsage = originalDiskUsage
 	}()
 
-	err = ensureCrossStorageMoveAllowed(context.Background(), srcStorage, dstStorage, "/folder", "/target")
+	err = moveBetweenLocalStorages(context.Background(), srcStorage, dstStorage, "/folder", "/target", false)
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(srcRoot, "folder"))
+	require.Error(t, err)
+	require.True(t, os.IsNotExist(err))
+	data, err := os.ReadFile(filepath.Join(dstRoot, "target", "folder", "a.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "1234", string(data))
+}
+
+func TestMoveBetweenLocalStoragesChecksDestinationFreeSpaceAfterCrossDeviceFallback(t *testing.T) {
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+
+	srcMount := "/src-" + t.Name()
+	dstMount := "/dst-" + t.Name()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(srcRoot, "folder"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dstRoot, "target"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(srcRoot, "folder", "a.txt"), []byte("1234"), 0o644))
+
+	srcStorageID, err := op.CreateStorage(context.Background(), model.Storage{
+		MountPath: srcMount,
+		Driver:    "Local",
+		Addition:  `{"root_folder_path":"` + srcRoot + `"}`,
+	})
+	require.NoError(t, err)
+	dstStorageID, err := op.CreateStorage(context.Background(), model.Storage{
+		MountPath: dstMount,
+		Driver:    "Local",
+		Addition:  `{"root_folder_path":"` + dstRoot + `"}`,
+	})
+	require.NoError(t, err)
+	require.NotZero(t, srcStorageID)
+	require.NotZero(t, dstStorageID)
+	srcStorage, err := op.GetStorageByMountPath(srcMount)
+	require.NoError(t, err)
+	dstStorage, err := op.GetStorageByMountPath(dstMount)
+	require.NoError(t, err)
+
+	originalDiskUsage := localDiskUsage
+	originalRename := localFileRename
+	localDiskUsage = func(path string) (*disk.UsageStat, error) {
+		return &disk.UsageStat{Free: 1}, nil
+	}
+	localFileRename = func(oldpath, newpath string) error {
+		return syscall.EXDEV
+	}
+	defer func() {
+		localDiskUsage = originalDiskUsage
+		localFileRename = originalRename
+	}()
+
+	err = moveBetweenLocalStorages(context.Background(), srcStorage, dstStorage, "/folder", "/target", false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "insufficient free space")
+	_, err = os.Stat(filepath.Join(srcRoot, "folder", "a.txt"))
+	require.NoError(t, err)
 }

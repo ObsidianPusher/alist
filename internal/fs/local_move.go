@@ -19,6 +19,7 @@ import (
 const localDriverName = "Local"
 
 var localDiskUsage = disk.Usage
+var localFileRename = os.Rename
 
 type moveStrategy uint8
 
@@ -90,10 +91,17 @@ func moveBetweenLocalStorages(ctx context.Context, srcStorage, dstStorage driver
 		return errors.New("the destination folder is a subfolder of the source folder")
 	}
 
-	err = os.Rename(srcFull, dstFull)
+	err = localFileRename(srcFull, dstFull)
 	if err != nil && (errors.Is(err, syscall.EXDEV) || strings.Contains(err.Error(), "invalid cross-device link")) {
 		if utils.IsCanceled(ctx) {
 			return ctx.Err()
+		}
+		requiredBytes, sizeErr := estimateMoveRequiredBytes(ctx, srcStorage, srcActualPath)
+		if sizeErr != nil {
+			return sizeErr
+		}
+		if err := ensureLocalMoveCapacity(dstStorage, dstDirActualPath, requiredBytes); err != nil {
+			return err
 		}
 		err = cp.Copy(srcFull, dstFull, cp.Options{
 			Sync:          true,
@@ -115,17 +123,6 @@ func moveBetweenLocalStorages(ctx context.Context, srcStorage, dstStorage driver
 		op.ClearCache(dstStorage, dstDirActualPath)
 	}
 	return nil
-}
-
-func ensureCrossStorageMoveAllowed(ctx context.Context, srcStorage, dstStorage driver.Driver, srcActualPath, dstDirActualPath string) error {
-	if resolveMoveStrategy(srcStorage, dstStorage) != moveStrategyCrossLocalStorages {
-		return errors.New("cross-storage move only supports local storages")
-	}
-	requiredBytes, err := estimateMoveRequiredBytes(ctx, srcStorage, srcActualPath)
-	if err != nil {
-		return err
-	}
-	return ensureLocalMoveCapacity(dstStorage, dstDirActualPath, requiredBytes)
 }
 
 func estimateMoveRequiredBytes(ctx context.Context, srcStorage driver.Driver, srcActualPath string) (int64, error) {

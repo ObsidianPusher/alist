@@ -231,13 +231,15 @@ func TestMoveAcrossStoragesRefreshesDirectoryListings(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(srcRoot, "folder"), 0o777))
 	require.NoError(t, os.WriteFile(filepath.Join(srcRoot, "folder", "a.txt"), []byte("a"), 0o666))
 
-	srcDriverAny, err := op.CreateStorage(context.Background(), model.Storage{
+	srcStorageID, err := op.CreateStorage(context.Background(), model.Storage{
 		MountPath: srcMount,
 		Driver:    "Local",
 		Addition:  `{"root_folder_path":"` + srcRoot + `"}`,
 	})
 	require.NoError(t, err)
-	srcStorage := srcDriverAny
+	require.NotZero(t, srcStorageID)
+	srcStorage, err := op.GetStorageByMountPath(srcMount)
+	require.NoError(t, err)
 
 	_, err = op.List(context.Background(), srcStorage, "folder", model.ListArgs{})
 	require.NoError(t, err)

@@ -3,10 +3,12 @@ package fs
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
 	"github.com/alist-org/alist/v3/internal/stream"
@@ -15,6 +17,7 @@ import (
 
 func TestPutAsTaskReturnsErrorWhenManagerMissing(t *testing.T) {
 	root := t.TempDir()
+	conf.Conf.TempDir = t.TempDir()
 	mount := "/put-nil-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
 
 	_, err := op.CreateStorage(context.Background(), model.Storage{
@@ -40,9 +43,14 @@ func TestPutAsTaskReturnsErrorWhenManagerMissing(t *testing.T) {
 		},
 		Reader: bytes.NewReader([]byte("hello")),
 	}
+	tempFile, err := file.CacheFullInTempFile()
+	require.NoError(t, err)
+	tempFilePath := tempFile.(*os.File).Name()
 
 	taskInfo, err := PutAsTask(context.Background(), filepath.ToSlash(mount), file)
 	require.Nil(t, taskInfo)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "upload task manager is not initialized")
+	_, statErr := os.Stat(tempFilePath)
+	require.True(t, os.IsNotExist(statErr))
 }
