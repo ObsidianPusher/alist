@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	stdpath "path"
 	"path/filepath"
@@ -20,6 +21,7 @@ const localDriverName = "Local"
 
 var localDiskUsage = disk.Usage
 var localFileRename = os.Rename
+var localTreeCopy = cp.Copy
 
 type moveStrategy uint8
 
@@ -103,11 +105,7 @@ func moveBetweenLocalStorages(ctx context.Context, srcStorage, dstStorage driver
 		if err := ensureLocalMoveCapacity(dstStorage, dstDirActualPath, requiredBytes); err != nil {
 			return err
 		}
-		err = cp.Copy(srcFull, dstFull, cp.Options{
-			Sync:          true,
-			PreserveTimes: true,
-			PreserveOwner: true,
-		})
+		err = copyBetweenLocalPaths(srcFull, dstFull)
 		if err != nil {
 			return err
 		}
@@ -123,6 +121,36 @@ func moveBetweenLocalStorages(ctx context.Context, srcStorage, dstStorage driver
 		op.ClearCache(dstStorage, dstDirActualPath)
 	}
 	return nil
+}
+
+func copyBetweenLocalPaths(srcFull, dstFull string) error {
+	err := localTreeCopy(srcFull, dstFull, cp.Options{
+		Sync:          true,
+		PreserveTimes: true,
+		PreserveOwner: true,
+	})
+	if !isUnsupportedMetadataPreserveErr(err) {
+		return err
+	}
+	if removeErr := os.RemoveAll(dstFull); removeErr != nil && !os.IsNotExist(removeErr) {
+		return errors.WithMessage(removeErr, "failed cleanup destination after unsupported metadata preserve")
+	}
+	return localTreeCopy(srcFull, dstFull, cp.Options{
+		Sync:              true,
+		PreserveTimes:     true,
+		PreserveOwner:     false,
+		PermissionControl: cp.DoNothing,
+	})
+}
+
+func isUnsupportedMetadataPreserveErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return stderrors.Is(err, syscall.EPERM) ||
+		stderrors.Is(err, syscall.ENOTSUP) ||
+		stderrors.Is(err, syscall.EOPNOTSUPP) ||
+		strings.Contains(strings.ToLower(err.Error()), "operation not permitted")
 }
 
 func estimateMoveRequiredBytes(ctx context.Context, srcStorage driver.Driver, srcActualPath string) (int64, error) {

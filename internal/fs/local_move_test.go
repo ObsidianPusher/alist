@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"github.com/alist-org/alist/v3/internal/driver"
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
+	cp "github.com/otiai10/copy"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/stretchr/testify/require"
 )
@@ -217,4 +219,68 @@ func TestMoveBetweenLocalStoragesChecksDestinationFreeSpaceAfterCrossDeviceFallb
 	require.Contains(t, err.Error(), "insufficient free space")
 	_, err = os.Stat(filepath.Join(srcRoot, "folder", "a.txt"))
 	require.NoError(t, err)
+}
+
+func TestMoveBetweenLocalStoragesRetriesWithoutPreserveOwnerForUnsupportedMetadata(t *testing.T) {
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+
+	srcMount := "/src-" + t.Name()
+	dstMount := "/dst-" + t.Name()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(srcRoot, "folder"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dstRoot, "target"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(srcRoot, "folder", "a.txt"), []byte("1234"), 0o644))
+
+	srcStorageID, err := op.CreateStorage(context.Background(), model.Storage{
+		MountPath: srcMount,
+		Driver:    "Local",
+		Addition:  `{"root_folder_path":"` + srcRoot + `"}`,
+	})
+	require.NoError(t, err)
+	dstStorageID, err := op.CreateStorage(context.Background(), model.Storage{
+		MountPath: dstMount,
+		Driver:    "Local",
+		Addition:  `{"root_folder_path":"` + dstRoot + `"}`,
+	})
+	require.NoError(t, err)
+	require.NotZero(t, srcStorageID)
+	require.NotZero(t, dstStorageID)
+	srcStorage, err := op.GetStorageByMountPath(srcMount)
+	require.NoError(t, err)
+	dstStorage, err := op.GetStorageByMountPath(dstMount)
+	require.NoError(t, err)
+
+	originalRename := localFileRename
+	originalCopy := localTreeCopy
+	localFileRename = func(oldpath, newpath string) error {
+		return syscall.EXDEV
+	}
+	attempts := 0
+	localTreeCopy = func(src, dest string, opts ...cp.Options) error {
+		attempts++
+		require.Len(t, opts, 1)
+		opt := opts[0]
+		if attempts == 1 {
+			require.True(t, opt.PreserveOwner)
+			return stderrors.New("chown " + dest + ": operation not permitted")
+		}
+		require.False(t, opt.PreserveOwner)
+		require.NotNil(t, opt.PermissionControl)
+		return originalCopy(src, dest, opt)
+	}
+	defer func() {
+		localFileRename = originalRename
+		localTreeCopy = originalCopy
+	}()
+
+	err = moveBetweenLocalStorages(context.Background(), srcStorage, dstStorage, "/folder", "/target", false)
+	require.NoError(t, err)
+	require.Equal(t, 2, attempts)
+	_, err = os.Stat(filepath.Join(srcRoot, "folder"))
+	require.Error(t, err)
+	require.True(t, os.IsNotExist(err))
+	data, err := os.ReadFile(filepath.Join(dstRoot, "target", "folder", "a.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "1234", string(data))
 }
