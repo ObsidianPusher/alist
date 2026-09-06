@@ -6,9 +6,7 @@ import (
 	"strings"
 )
 
-var allowedExtensions = map[string]struct{}{
-	".json": {}, ".md": {}, ".mdx": {}, ".rst": {}, ".txt": {}, ".yaml": {}, ".yml": {},
-}
+var allowedExtensions = map[string]struct{}{".md": {}}
 
 func ResolvePath(root, relative string) (string, error) {
 	if root == "" || !path.IsAbs(root) || relative == "" || path.IsAbs(relative) {

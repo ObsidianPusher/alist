@@ -50,8 +50,8 @@ func TestListRecursivelyReturnsOnlySupportedDocuments(t *testing.T) {
 
 	result, err := svc.List(context.Background(), "", "", 100)
 	require.NoError(t, err)
-	require.Equal(t, []string{"README.md", "guides/config.yaml", "guides/intro.md"}, documentPaths(result.Items))
-	require.Equal(t, []int64{4, 13, 5}, documentSizes(result.Items))
+	require.Equal(t, []string{"README.md", "guides/intro.md"}, documentPaths(result.Items))
+	require.Equal(t, []int64{4, 5}, documentSizes(result.Items))
 	for _, item := range result.Items {
 		require.False(t, item.Modified.IsZero())
 	}
@@ -63,13 +63,12 @@ func TestListPaginatesAfterCursor(t *testing.T) {
 
 	first, err := svc.List(context.Background(), "", "", 2)
 	require.NoError(t, err)
-	require.Equal(t, []string{"README.md", "guides/config.yaml"}, documentPaths(first.Items))
-	require.Equal(t, "guides/config.yaml", first.NextCursor)
+	require.Equal(t, []string{"README.md", "guides/intro.md"}, documentPaths(first.Items))
+	require.Empty(t, first.NextCursor)
 
-	second, err := svc.List(context.Background(), "", first.NextCursor, 2)
+	second, err := svc.List(context.Background(), "", "README.md", 2)
 	require.NoError(t, err)
 	require.Equal(t, []string{"guides/intro.md"}, documentPaths(second.Items))
-	require.Empty(t, second.NextCursor)
 }
 
 func documentPaths(items []DocumentInfo) []string {
