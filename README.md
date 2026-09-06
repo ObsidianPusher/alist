@@ -100,6 +100,8 @@ English | [中文](./README_cn.md)| [日本語](./README_ja.md) | [Contributing]
 
 <https://alist.nn.ci/>
 
+Embedded agent document MCP setup is documented in [docs/mcp-docs.md](docs/mcp-docs.md).
+
 ## Demo
 
 <https://al.nn.ci>

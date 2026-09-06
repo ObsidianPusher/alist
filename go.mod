@@ -25,6 +25,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/json-iterator/go v1.1.12
 	github.com/maruel/natural v1.1.1
+	github.com/modelcontextprotocol/go-sdk v0.8.0
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/nwaples/rardecode/v2 v2.0.0-beta.4
 	github.com/pkg/errors v0.9.1
@@ -58,13 +59,14 @@ require (
 	github.com/cloudwego/base64x v0.1.4 // indirect
 	github.com/cloudwego/iasm v0.2.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/jsonschema-go v0.3.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jackc/puddle/v2 v2.2.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/rogpeppe/go-internal v1.10.0 // indirect
 	github.com/spf13/afero v1.11.0 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go4.org v0.0.0-20200411211856-f5505b9728dd // indirect
 	golang.org/x/net v0.41.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

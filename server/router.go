@@ -7,10 +7,12 @@ import (
 	"github.com/alist-org/alist/v3/pkg/utils"
 	"github.com/alist-org/alist/v3/server/common"
 	"github.com/alist-org/alist/v3/server/handles"
+	"github.com/alist-org/alist/v3/server/mcp"
 	"github.com/alist-org/alist/v3/server/middlewares"
 	"github.com/alist-org/alist/v3/server/static"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 )
 
 func Init(e *gin.Engine) {
@@ -37,6 +39,9 @@ func Init(e *gin.Engine) {
 		g.Use(middlewares.MaxAllowed(conf.Conf.MaxConnections))
 	}
 	WebDav(g.Group("/dav"))
+	if err := mcp.Register(g.Group("/mcp"), conf.Conf.MCP); err != nil {
+		log.Errorf("failed to initialize MCP service: %s", err)
+	}
 
 	g.GET("/d/*path", middlewares.Down, handles.Down)
 	g.GET("/p/*path", middlewares.Down, handles.Proxy)
