@@ -3,7 +3,7 @@ package conf
 import "testing"
 
 func TestDefaultMCPConfigIsDisabledAndBounded(t *testing.T) {
-	c := DefaultConfig().MCP
+	c := DefaultMCPConfig()
 	if c.Enabled {
 		t.Fatal("MCP must be disabled by default")
 	}
