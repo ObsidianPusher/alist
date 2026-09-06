@@ -13,7 +13,7 @@ it immediately invalidates the prior token; AList stores only its SHA-256 hash.
 
 Expose the endpoint only through HTTPS. Clients send `Authorization: Bearer <token>`.
 
-Tools are `docs_search`, `docs_read`, `docs_update`, `docs_delete`, `docs_move`, and `docs_history`. Every path is relative to `docs_root`; only UTF-8 `.md`, `.mdx`, `.txt`, `.rst`, `.json`, `.yaml`, and `.yml` files are accepted. Updates, moves, and deletes require the `revision` returned by `docs_read`, preventing stale Agents from silently overwriting a document.
+Tools are `docs_search`, `docs_list`, `docs_read`, `docs_update`, `docs_delete`, `docs_move`, and `docs_history`. `docs_list` recursively lists eligible documents without returning their bodies; it accepts optional `path_prefix`, `cursor`, and `limit` (default and maximum 100). Continue until `next_cursor` is empty to enumerate the entire document root. Every path is relative to `docs_root`; only UTF-8 `.md`, `.mdx`, `.txt`, `.rst`, `.json`, `.yaml`, and `.yml` files are accepted. Updates, moves, and deletes require the `revision` returned by `docs_read`, preventing stale Agents from silently overwriting a document.
 
 The content index is distinct from AList's filename index. Disabling MCP leaves
 all documents and their AList storage untouched.

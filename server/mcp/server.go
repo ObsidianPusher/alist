@@ -23,6 +23,11 @@ type searchInput struct {
 	PathPrefix string `json:"path_prefix,omitempty"`
 	Limit      int    `json:"limit,omitempty"`
 }
+type listInput struct {
+	PathPrefix string `json:"path_prefix,omitempty"`
+	Cursor     string `json:"cursor,omitempty"`
+	Limit      int    `json:"limit,omitempty"`
+}
 type readInput struct {
 	Path   string `json:"path"`
 	Offset int64  `json:"offset,omitempty"`
@@ -48,6 +53,10 @@ type historyInput struct {
 }
 type searchOutput struct {
 	Results []docs.SearchResult `json:"results"`
+}
+type listOutput struct {
+	Items      []docs.DocumentInfo `json:"items"`
+	NextCursor string              `json:"next_cursor,omitempty"`
 }
 type historyOutput struct {
 	Items []docs.HistoryResult `json:"items"`
@@ -127,6 +136,10 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_search", Description: "Search document text by keywords"}, func(ctx context.Context, _ *protocol.CallToolRequest, in searchInput) (*protocol.CallToolResult, searchOutput, error) {
 		r, e := svc.Search(in.Query, in.PathPrefix, in.Limit)
 		return nil, searchOutput{Results: r}, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List documents under the configured root"}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
+		r, e := svc.List(ctx, in.PathPrefix, in.Cursor, in.Limit)
+		return nil, listOutput(r), e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read a document and its revision"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, docs.ReadResult, error) {
 		r, e := svc.Read(ctx, in.Path, in.Offset, in.Limit)

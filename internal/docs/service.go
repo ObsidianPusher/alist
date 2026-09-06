@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/alist-org/alist/v3/internal/conf"
@@ -38,6 +40,15 @@ type HistoryResult struct {
 	Revision string `json:"revision"`
 	Action   string `json:"action"`
 	Content  string `json:"content,omitempty"`
+}
+type DocumentInfo struct {
+	Path     string    `json:"path"`
+	Size     int64     `json:"size"`
+	Modified time.Time `json:"modified"`
+}
+type ListResult struct {
+	Items      []DocumentInfo `json:"items"`
+	NextCursor string         `json:"next_cursor,omitempty"`
 }
 
 type Service struct {
@@ -249,6 +260,63 @@ func (s *Service) History(p, rev string) ([]HistoryResult, error) {
 
 func (s *Service) Search(query, prefix string, limit int) ([]SearchResult, error) {
 	return s.index.Search(query, prefix, limit)
+}
+
+func (s *Service) List(ctx context.Context, prefix, cursor string, limit int) (ListResult, error) {
+	if limit < 1 {
+		limit = 100
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	prefix = strings.Trim(path.Clean("/"+prefix), "/")
+	if strings.HasPrefix(cursor, "/") || strings.Contains(cursor, "../") {
+		return ListResult{}, fmt.Errorf("invalid document cursor")
+	}
+	items := make([]DocumentInfo, 0)
+	root := strings.TrimSuffix(s.config.DocsRoot, "/")
+	var walk func(string) error
+	walk = func(full string) error {
+		objs, err := fs.List(ctx, full, &fs.ListArgs{NoLog: true})
+		if err != nil {
+			return err
+		}
+		for _, obj := range objs {
+			child := path.Join(full, obj.GetName())
+			if obj.IsDir() {
+				if err := walk(child); err != nil {
+					return err
+				}
+				continue
+			}
+			rel := strings.TrimPrefix(child, root+"/")
+			if _, err := s.fullPath(rel); err != nil {
+				continue
+			}
+			if prefix != "" && rel != prefix && !strings.HasPrefix(rel, prefix+"/") {
+				continue
+			}
+			items = append(items, DocumentInfo{Path: rel, Size: obj.GetSize(), Modified: obj.ModTime()})
+		}
+		return nil
+	}
+	if err := walk(s.config.DocsRoot); err != nil {
+		return ListResult{}, err
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	start := 0
+	for start < len(items) && items[start].Path <= cursor {
+		start++
+	}
+	end := start + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	result := ListResult{Items: items[start:end]}
+	if end < len(items) {
+		result.NextCursor = items[end-1].Path
+	}
+	return result, nil
 }
 
 // Rebuild indexes every eligible document below the configured root. Files larger
