@@ -128,6 +128,8 @@ func admin(g *gin.RouterGroup) {
 	setting.POST("/save", handles.SaveSettings)
 	setting.POST("/delete", handles.DeleteSetting)
 	setting.POST("/reset_token", handles.ResetToken)
+	setting.GET("/mcp/config", handles.GetMCPConfig)
+	setting.POST("/mcp/token/reset", handles.ResetMCPToken)
 
 	system := g.Group("/system")
 	system.GET("/memory", handles.GetMemoryStats)
