@@ -38,6 +38,10 @@
 
 服务启动时若 MCP 启用但根路径、token hash 或索引目录无效，应拒绝启动 MCP 子系统并记录明确错误；AList 主服务继续工作。
 
+## 运行时依赖
+
+项目 Go 基线升级到 1.23。MCP transport 固定使用 `github.com/modelcontextprotocol/go-sdk v0.8.0`，这是支持 Go 1.23 的官方 SDK 版本；它提供 Gin 可适配的 `StreamableHTTPHandler`。
+
 ## 安全
 
 - 认证仅接受 `Authorization: Bearer <token>`；使用常量时间比较摘要，日志、错误和历史记录均不得包含 Token 或正文。
