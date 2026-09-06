@@ -12,6 +12,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/stream"
 	"github.com/alist-org/alist/v3/pkg/http_range"
+	"github.com/google/uuid"
 )
 
 var ErrConflict = errors.New("document revision conflict")
@@ -50,10 +52,25 @@ type ListResult struct {
 	Items      []DocumentInfo `json:"items"`
 	NextCursor string         `json:"next_cursor,omitempty"`
 }
+type SectionResult struct {
+	Path     string  `json:"path"`
+	Revision string  `json:"revision"`
+	Chunks   []Chunk `json:"chunks"`
+}
+type IndexStatus struct {
+	Generation  string    `json:"generation"`
+	Running     bool      `json:"running"`
+	Documents   int       `json:"documents"`
+	Chunks      int       `json:"chunks"`
+	Failed      int       `json:"failed"`
+	LastSuccess time.Time `json:"last_success,omitempty"`
+}
 
 type Service struct {
-	config conf.MCPConfig
-	index  *Index
+	config   conf.MCPConfig
+	index    *Index
+	statusMu sync.RWMutex
+	status   IndexStatus
 }
 
 func New(config conf.MCPConfig) (*Service, error) {
@@ -260,6 +277,70 @@ func (s *Service) History(p, rev string) ([]HistoryResult, error) {
 
 func (s *Service) Search(query, prefix string, limit int) ([]SearchResult, error) {
 	return s.index.Search(query, prefix, limit)
+}
+
+func (s *Service) ReadSection(ctx context.Context, p, sectionID string, adjacent int) (SectionResult, error) {
+	if adjacent < 0 || adjacent > 5 {
+		return SectionResult{}, fmt.Errorf("invalid adjacent chunk count")
+	}
+	read, err := s.Read(ctx, p, 0, 0)
+	if err != nil {
+		return SectionResult{}, err
+	}
+	chunks := ChunkMarkdown(read.Content, defaultChunkChars)
+	for i, chunk := range chunks {
+		if chunk.ID != sectionID {
+			continue
+		}
+		start, end := i-adjacent, i+adjacent+1
+		if start < 0 {
+			start = 0
+		}
+		if end > len(chunks) {
+			end = len(chunks)
+		}
+		return SectionResult{Path: p, Revision: read.Revision, Chunks: chunks[start:end]}, nil
+	}
+	return SectionResult{}, fmt.Errorf("document section not found")
+}
+
+func (s *Service) Status() IndexStatus {
+	s.statusMu.RLock()
+	defer s.statusMu.RUnlock()
+	return s.status
+}
+func (s *Service) RebuildAsync(ctx context.Context) (string, error) {
+	s.statusMu.Lock()
+	if s.status.Running {
+		generation := s.status.Generation
+		s.statusMu.Unlock()
+		return generation, nil
+	}
+	generation := uuid.NewString()
+	s.status = IndexStatus{Generation: generation, Running: true}
+	s.statusMu.Unlock()
+	go func() {
+		err := s.Rebuild(ctx)
+		listed, listErr := s.List(context.Background(), "", "", 100000)
+		status := IndexStatus{Generation: generation, Documents: len(listed.Items)}
+		if err == nil && listErr == nil {
+			status.LastSuccess = time.Now()
+			for _, item := range listed.Items {
+				read, readErr := s.Read(context.Background(), item.Path, 0, 0)
+				if readErr != nil {
+					status.Failed++
+					continue
+				}
+				status.Chunks += len(ChunkMarkdown(read.Content, defaultChunkChars))
+			}
+		} else {
+			status.Failed = 1
+		}
+		s.statusMu.Lock()
+		s.status = status
+		s.statusMu.Unlock()
+	}()
+	return generation, nil
 }
 
 func (s *Service) List(ctx context.Context, prefix, cursor string, limit int) (ListResult, error) {
