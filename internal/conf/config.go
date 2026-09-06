@@ -56,6 +56,7 @@ type Config struct {
 	DelayedStart          int         `json:"delayed_start" env:"DELAYED_START"`
 	MaxConnections        int         `json:"max_connections" env:"MAX_CONNECTIONS"`
 	TlsInsecureSkipVerify bool        `json:"tls_insecure_skip_verify" env:"TLS_INSECURE_SKIP_VERIFY"`
+	MCP                   MCPConfig   `json:"mcp" envPrefix:"MCP_"`
 }
 
 func DefaultConfig() *Config {
@@ -92,6 +93,7 @@ func DefaultConfig() *Config {
 		},
 		MaxConnections:        0,
 		TlsInsecureSkipVerify: true,
+		MCP:                   DefaultMCPConfig(),
 	}
 }
 

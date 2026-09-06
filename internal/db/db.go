@@ -21,6 +21,7 @@ func Init(d *gorm.DB) {
 		new(model.TaskItem),
 		new(model.VideoProgress),
 		new(model.VideoFavorite),
+		new(model.DocsHistory),
 	)
 	if err != nil {
 		log.Fatalf("failed migrate database: %s", err.Error())
