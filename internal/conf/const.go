@@ -97,6 +97,13 @@ const (
 	S3SecretAccessKey = "s3_secret_access_key"
 	S3Buckets         = "s3_buckets"
 
+	MCPEnabled       = "mcp_enabled"
+	MCPDocsRoot      = "mcp_docs_root"
+	MCPTokenHash     = "mcp_token_hash"
+	MCPMaxReadBytes  = "mcp_max_read_bytes"
+	MCPMaxWriteBytes = "mcp_max_write_bytes"
+	MCPHistoryLimit  = "mcp_history_limit"
+
 	// qbittorrent
 	QbittorrentUrl      = "qbittorrent_url"
 	QbittorrentSeedtime = "qbittorrent_seedtime"

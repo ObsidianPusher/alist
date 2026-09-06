@@ -215,6 +215,13 @@ func InitialSettings() []model.SettingItem {
 		{Key: conf.S3AccessKeyID, Value: "", Type: conf.TypeString, Group: model.S3, Flag: model.PRIVATE},
 		{Key: conf.S3SecretAccessKey, Value: "", Type: conf.TypeString, Group: model.S3, Flag: model.PRIVATE},
 		{Key: conf.S3Buckets, Value: "[]", Type: conf.TypeText, Group: model.S3, Flag: model.PRIVATE},
+
+		{Key: conf.MCPEnabled, Value: "false", Type: conf.TypeBool, Group: model.MCP, Flag: model.PRIVATE},
+		{Key: conf.MCPDocsRoot, Value: "", Type: conf.TypeString, Group: model.MCP, Flag: model.PRIVATE},
+		{Key: conf.MCPTokenHash, Value: "", Type: conf.TypeString, Group: model.MCP, Flag: model.PRIVATE},
+		{Key: conf.MCPMaxReadBytes, Value: "1048576", Type: conf.TypeNumber, Group: model.MCP, Flag: model.PRIVATE},
+		{Key: conf.MCPMaxWriteBytes, Value: "1048576", Type: conf.TypeNumber, Group: model.MCP, Flag: model.PRIVATE},
+		{Key: conf.MCPHistoryLimit, Value: "50", Type: conf.TypeNumber, Group: model.MCP, Flag: model.PRIVATE},
 	}
 	if flags.Dev {
 		initialSettingItems = append(initialSettingItems, []model.SettingItem{
