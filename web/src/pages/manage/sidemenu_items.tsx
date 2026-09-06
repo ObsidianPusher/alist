@@ -81,6 +81,12 @@ export const side_menu_items: SideMenuItem[] = [
         component: lazy(() => import("./settings/S3")),
       },
       {
+        title: "manage.sidemenu.mcp",
+        icon: CgDatabase,
+        to: "/@manage/settings/mcp",
+        component: lazy(() => import("./settings/MCP")),
+      },
+      {
         title: "manage.sidemenu.other",
         icon: BsMedium,
         to: "/@manage/settings/other",

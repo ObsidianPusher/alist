@@ -11,6 +11,7 @@ export enum Group {
   SSO,
   LDAP,
   S3,
+  MCP,
 }
 export enum Flag {
   PUBLIC,
