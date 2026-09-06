@@ -33,6 +33,11 @@ type readInput struct {
 	Offset int64  `json:"offset,omitempty"`
 	Limit  int64  `json:"limit,omitempty"`
 }
+type readSectionInput struct {
+	Path      string `json:"path"`
+	SectionID string `json:"section_id"`
+	Adjacent  int    `json:"adjacent,omitempty"`
+}
 type updateInput struct {
 	Path             string  `json:"path"`
 	Content          string  `json:"content"`
@@ -60,6 +65,9 @@ type listOutput struct {
 }
 type historyOutput struct {
 	Items []docs.HistoryResult `json:"items"`
+}
+type rebuildOutput struct {
+	Generation string `json:"generation"`
 }
 
 type runtimeState struct {
@@ -131,7 +139,7 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	if err != nil {
 		return nil, err
 	}
-	go func() { _ = svc.Rebuild(context.Background()) }()
+	_, _ = svc.RebuildAsync(context.Background())
 	server := protocol.NewServer(&protocol.Implementation{Name: "alist-docs", Version: "1.0.0"}, nil)
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_search", Description: "Search document text by keywords"}, func(ctx context.Context, _ *protocol.CallToolRequest, in searchInput) (*protocol.CallToolResult, searchOutput, error) {
 		r, e := svc.Search(in.Query, in.PathPrefix, in.Limit)
@@ -144,6 +152,17 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read a document and its revision"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, docs.ReadResult, error) {
 		r, e := svc.Read(ctx, in.Path, in.Offset, in.Limit)
 		return nil, r, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_read_section", Description: "Read a Markdown section and adjacent chunks"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readSectionInput) (*protocol.CallToolResult, docs.SectionResult, error) {
+		r, e := svc.ReadSection(ctx, in.Path, in.SectionID, in.Adjacent)
+		return nil, r, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_index_status", Description: "Get Markdown index status"}, func(context.Context, *protocol.CallToolRequest, struct{}) (*protocol.CallToolResult, docs.IndexStatus, error) {
+		return nil, svc.Status(), nil
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_rebuild_index", Description: "Rebuild the Markdown index"}, func(ctx context.Context, _ *protocol.CallToolRequest, _ struct{}) (*protocol.CallToolResult, rebuildOutput, error) {
+		generation, e := svc.RebuildAsync(ctx)
+		return nil, rebuildOutput{Generation: generation}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_update", Description: "Create or conditionally replace a document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in updateInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.Update(ctx, in.Path, in.Content, in.ExpectedRevision)
