@@ -39,7 +39,7 @@ func Init(e *gin.Engine) {
 		g.Use(middlewares.MaxAllowed(conf.Conf.MaxConnections))
 	}
 	WebDav(g.Group("/dav"))
-	if err := mcp.Register(g.Group("/mcp"), conf.Conf.MCP); err != nil {
+	if err := mcp.Register(g.Group("/mcp")); err != nil {
 		log.Errorf("failed to initialize MCP service: %s", err)
 	}
 
@@ -129,6 +129,7 @@ func admin(g *gin.RouterGroup) {
 	setting.POST("/delete", handles.DeleteSetting)
 	setting.POST("/reset_token", handles.ResetToken)
 	setting.GET("/mcp/config", handles.GetMCPConfig)
+	setting.POST("/mcp/config", handles.SaveMCPConfig)
 	setting.POST("/mcp/token/reset", handles.ResetMCPToken)
 
 	system := g.Group("/system")

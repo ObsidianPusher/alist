@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alist-org/alist/v3/internal/conf"
@@ -51,16 +53,74 @@ type historyOutput struct {
 	Items []docs.HistoryResult `json:"items"`
 }
 
-func Register(g *gin.RouterGroup, config conf.MCPConfig) error {
+type runtimeState struct {
+	handler   http.Handler
+	svc       *docs.Service
+	requests  atomic.Int64
+	retired   atomic.Bool
+	closeOnce sync.Once
+}
+
+func (s *runtimeState) release() {
+	if s.requests.Add(-1) == 0 && s.retired.Load() {
+		s.close()
+	}
+}
+func (s *runtimeState) retire() {
+	s.retired.Store(true)
+	if s.requests.Load() == 0 {
+		s.close()
+	}
+}
+func (s *runtimeState) close() { s.closeOnce.Do(func() { _ = s.svc.Close() }) }
+
+var active atomic.Pointer[runtimeState]
+
+func Register(g *gin.RouterGroup) error {
+	if err := Reload(); err != nil {
+		return err
+	}
+	g.Any("", func(c *gin.Context) {
+		state := active.Load()
+		if state == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		state.requests.Add(1)
+		defer state.release()
+		state.handler.ServeHTTP(c.Writer, c.Request)
+	})
+	return nil
+}
+
+func Reload() error {
+	config, err := LoadConfig()
+	if err != nil {
+		return err
+	}
 	if !config.Enabled {
+		if old := active.Swap(nil); old != nil {
+			old.retire()
+		}
 		return nil
 	}
+	state, err := newRuntime(config)
+	if err != nil {
+		return err
+	}
+	if old := active.Swap(state); old != nil {
+		old.retire()
+	}
+	return nil
+}
+
+func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	if config.TokenHash == "" {
-		return fmt.Errorf("mcp token_hash is required when enabled")
+		return nil, fmt.Errorf("mcp token_hash is required when enabled")
 	}
 	svc, err := docs.New(config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	go func() { _ = svc.Rebuild(context.Background()) }()
 	server := protocol.NewServer(&protocol.Implementation{Name: "alist-docs", Version: "1.0.0"}, nil)
@@ -89,22 +149,20 @@ func Register(g *gin.RouterGroup, config conf.MCPConfig) error {
 		return nil, historyOutput{Items: r}, e
 	})
 	h := protocol.NewStreamableHTTPHandler(func(*http.Request) *protocol.Server { return server }, &protocol.StreamableHTTPOptions{JSONResponse: true})
-	g.Any("", auth(config, h))
-	return nil
+	return &runtimeState{handler: auth(config, h), svc: svc}, nil
 }
 
-func auth(config conf.MCPConfig, next http.Handler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		token := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+func auth(config conf.MCPConfig, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		sum := sha256.Sum256([]byte(token))
 		got := hex.EncodeToString(sum[:])
 		if token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(config.TokenHash)) != 1 {
-			c.Status(http.StatusUnauthorized)
-			c.Abort()
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		next.ServeHTTP(c.Writer, c.Request.WithContext(ctx))
-	}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
