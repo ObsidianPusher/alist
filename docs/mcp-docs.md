@@ -1,23 +1,19 @@
 # Embedded document MCP
 
-Enable the service only after configuring a dedicated document root and a dedicated secret:
+Use **Management → Settings → MCP Documents** to configure the embedded MCP
+service. Configuration is stored in AList's database, never in the application
+configuration file. Choose a mounted folder as the document root, set limits
+and history count, then save; the running MCP handler reloads immediately.
 
-```json
-{
-  "mcp": {
-    "enabled": true,
-    "docs_root": "/knowledge",
-    "token_hash": "<sha256-of-a-random-token>",
-    "index_dir": "data/docs-bleve",
-    "max_read_bytes": 1048576,
-    "max_write_bytes": 1048576,
-    "history_limit": 50
-  }
-}
-```
+The endpoint uses the domain and base path currently open in the management
+page: `https://host[/base]/mcp`. Use **Generate / Reset Token** to create a
+bearer token. The raw token is shown only once in the reset response, together
+with copyable Codex CLI, Claude Code CLI, and generic JSON snippets. Resetting
+it immediately invalidates the prior token; AList stores only its SHA-256 hash.
 
-Expose `https://host/mcp` only through HTTPS. Clients send `Authorization: Bearer <token>`. The raw token is never stored by AList; calculate its SHA-256 digest and store the lowercase hexadecimal result as `token_hash`.
+Expose the endpoint only through HTTPS. Clients send `Authorization: Bearer <token>`.
 
 Tools are `docs_search`, `docs_read`, `docs_update`, `docs_delete`, `docs_move`, and `docs_history`. Every path is relative to `docs_root`; only UTF-8 `.md`, `.mdx`, `.txt`, `.rst`, `.json`, `.yaml`, and `.yml` files are accepted. Updates, moves, and deletes require the `revision` returned by `docs_read`, preventing stale Agents from silently overwriting a document.
 
-The content index is distinct from AList's filename index. If it becomes stale, disable MCP, remove the configured `index_dir`, then restart AList to rebuild it during the next writes. Disabling MCP leaves all documents and their AList storage untouched.
+The content index is distinct from AList's filename index. Disabling MCP leaves
+all documents and their AList storage untouched.
