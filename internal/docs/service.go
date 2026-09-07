@@ -167,6 +167,9 @@ func (s *Service) readBytes(ctx context.Context, full string, offset, limit int6
 }
 
 func (s *Service) Read(ctx context.Context, p string, offset, limit int64) (ReadResult, error) {
+	return s.ReadWithRevision(ctx, p, offset, limit, true)
+}
+func (s *Service) ReadWithRevision(ctx context.Context, p string, offset, limit int64, includeRevision bool) (ReadResult, error) {
 	full, err := s.fullPath(p)
 	if err != nil {
 		return ReadResult{}, err
@@ -178,11 +181,15 @@ func (s *Service) Read(ctx context.Context, p string, offset, limit int64) (Read
 	if !utf8.Valid(b) {
 		return ReadResult{}, fmt.Errorf("document is not valid UTF-8")
 	}
-	all, _, _, err := s.readBytes(ctx, full, 0, size)
-	if err != nil {
-		return ReadResult{}, err
+	result := ReadResult{Content: string(b), Size: size, Truncated: truncated}
+	if includeRevision {
+		all, _, _, err := s.readBytes(ctx, full, 0, size)
+		if err != nil {
+			return ReadResult{}, err
+		}
+		result.Revision = revision(all)
 	}
-	return ReadResult{Content: string(b), Revision: revision(all), Size: size, Truncated: truncated}, nil
+	return result, nil
 }
 
 func (s *Service) Update(ctx context.Context, p, content string, expected *string) (string, error) {
@@ -262,6 +269,23 @@ func (s *Service) Append(ctx context.Context, p, sectionID, content, expected st
 		}
 	}
 	return "", fmt.Errorf("document section not found")
+}
+func (s *Service) InsertAfter(ctx context.Context, p, anchor, content, expected string) (string, error) {
+	if anchor == "" {
+		return "", fmt.Errorf("anchor is required")
+	}
+	current, err := s.Read(ctx, p, 0, 0)
+	if err != nil {
+		return "", err
+	}
+	if current.Revision != expected {
+		return "", &ConflictError{ActualRevision: current.Revision}
+	}
+	if strings.Count(current.Content, anchor) != 1 {
+		return "", fmt.Errorf("anchor must occur exactly once")
+	}
+	next := strings.Replace(current.Content, anchor, anchor+content, 1)
+	return s.Update(ctx, p, next, &expected)
 }
 
 func (s *Service) UpdateSection(ctx context.Context, p, sectionID, content, expected string) (string, error) {

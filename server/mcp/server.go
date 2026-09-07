@@ -29,9 +29,10 @@ type listInput struct {
 	Limit      int    `json:"limit,omitempty"`
 }
 type readInput struct {
-	Path   string `json:"path"`
-	Offset int64  `json:"offset,omitempty"`
-	Limit  int64  `json:"limit,omitempty"`
+	Path            string `json:"path"`
+	Offset          int64  `json:"offset,omitempty"`
+	Limit           int64  `json:"limit,omitempty"`
+	IncludeRevision *bool  `json:"include_revision,omitempty"`
 }
 type readSectionInput struct {
 	Path      string `json:"path"`
@@ -66,6 +67,12 @@ type outlineInput struct {
 type appendInput struct {
 	Path             string `json:"path"`
 	SectionID        string `json:"section_id"`
+	Content          string `json:"content"`
+	ExpectedRevision string `json:"expected_revision"`
+}
+type insertAfterInput struct {
+	Path             string `json:"path"`
+	Anchor           string `json:"anchor"`
 	Content          string `json:"content"`
 	ExpectedRevision string `json:"expected_revision"`
 }
@@ -186,7 +193,11 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 		return nil, listOutput(r), e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read a document and its revision"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, docs.ReadResult, error) {
-		r, e := svc.Read(ctx, in.Path, in.Offset, in.Limit)
+		includeRevision := true
+		if in.IncludeRevision != nil {
+			includeRevision = *in.IncludeRevision
+		}
+		r, e := svc.ReadWithRevision(ctx, in.Path, in.Offset, in.Limit, includeRevision)
 		return nil, r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_outline", Description: "Read compact Markdown section outline"}, func(ctx context.Context, _ *protocol.CallToolRequest, in outlineInput) (*protocol.CallToolResult, docs.OutlineResult, error) {
@@ -195,6 +206,10 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_append", Description: "Append text to a Markdown section"}, func(ctx context.Context, _ *protocol.CallToolRequest, in appendInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.Append(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
+		return nil, map[string]string{"revision": r}, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_insert_after", Description: "Insert text after one unique anchor"}, func(ctx context.Context, _ *protocol.CallToolRequest, in insertAfterInput) (*protocol.CallToolResult, map[string]string, error) {
+		r, e := svc.InsertAfter(ctx, in.Path, in.Anchor, in.Content, in.ExpectedRevision)
 		return nil, map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read_section", Description: "Read a Markdown section and adjacent chunks"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readSectionInput) (*protocol.CallToolResult, docs.SectionResult, error) {

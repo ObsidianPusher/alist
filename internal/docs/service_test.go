@@ -109,6 +109,17 @@ func TestOutlineAndAppendAvoidFullDocumentEdits(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestInsertAfterEditsWithUniqueAnchor(t *testing.T) {
+	svc := setupListService(t)
+	read, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.InsertAfter(context.Background(), "README.md", "root", " added", read.Revision)
+	require.NoError(t, err)
+	changed, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, "root added", changed.Content)
+}
+
 func documentPaths(items []DocumentInfo) []string {
 	paths := make([]string, 0, len(items))
 	for _, item := range items {
