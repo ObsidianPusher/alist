@@ -105,10 +105,10 @@ func (i *Index) Delete(p string) error {
 }
 func (i *Index) Search(q, prefix string, limit int) ([]SearchResult, error) {
 	if limit < 1 {
-		limit = 20
+		limit = 5
 	}
-	if limit > 20 {
-		limit = 20
+	if limit > 10 {
+		limit = 10
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -128,8 +128,8 @@ func (i *Index) Search(q, prefix string, limit int) ([]SearchResult, error) {
 			continue
 		}
 		c, _ := h.Fields["content"].(string)
-		if len(c) > 240 {
-			c = c[:240]
+		if len([]rune(c)) > 80 {
+			c = string([]rune(c)[:80])
 		}
 		r, _ := h.Fields["revision"].(string)
 		sectionID, _ := h.Fields["section_id"].(string)

@@ -84,8 +84,9 @@ type moveInput struct {
 	ExpectedRevision string `json:"expected_revision"`
 }
 type historyInput struct {
-	Path     string `json:"path"`
-	Revision string `json:"revision,omitempty"`
+	Path           string `json:"path"`
+	Revision       string `json:"revision,omitempty"`
+	IncludeContent bool   `json:"include_content,omitempty"`
 }
 type searchOutput struct {
 	Results []docs.SearchResult `json:"results"`
@@ -232,7 +233,7 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 		return nil, map[string]string{"status": "moved"}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_history", Description: "List document history or retrieve a historical snapshot"}, func(ctx context.Context, _ *protocol.CallToolRequest, in historyInput) (*protocol.CallToolResult, historyOutput, error) {
-		r, e := svc.History(in.Path, in.Revision)
+		r, e := svc.History(in.Path, in.Revision, in.IncludeContent)
 		return nil, historyOutput{Items: r}, e
 	})
 	h := protocol.NewStreamableHTTPHandler(func(*http.Request) *protocol.Server { return server }, &protocol.StreamableHTTPOptions{JSONResponse: true})

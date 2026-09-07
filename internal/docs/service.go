@@ -386,7 +386,7 @@ func (s *Service) record(p, rev, action string, before []byte) {
 	_ = w.Close()
 	_ = db.CreateDocsHistory(&model.DocsHistory{Path: p, Revision: rev, Action: action, Snapshot: b.Bytes()}, s.config.HistoryLimit)
 }
-func (s *Service) History(p, rev string) ([]HistoryResult, error) {
+func (s *Service) History(p, rev string, includeContent bool) ([]HistoryResult, error) {
 	items, err := db.ListDocsHistory(p)
 	if err != nil {
 		return nil, err
@@ -397,7 +397,7 @@ func (s *Service) History(p, rev string) ([]HistoryResult, error) {
 			continue
 		}
 		r := HistoryResult{Revision: it.Revision, Action: it.Action}
-		if rev != "" {
+		if includeContent && rev != "" {
 			z, e := gzip.NewReader(bytes.NewReader(it.Snapshot))
 			if e != nil {
 				return nil, e
@@ -514,7 +514,7 @@ func (s *Service) RebuildAsync(ctx context.Context) (string, error) {
 
 func (s *Service) List(ctx context.Context, prefix, cursor string, limit int) (ListResult, error) {
 	if limit < 1 {
-		limit = 100
+		limit = 20
 	}
 	if limit > 100 {
 		limit = 100
