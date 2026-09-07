@@ -14,12 +14,6 @@ func TestIndexReplacesDocumentWithHeadingAwareChunks(t *testing.T) {
 	require.NoError(t, idx.Replace("guide.md", "v1", time.Now(), ChunkMarkdown("# Guide\n\nfirst needle\n\n## Install\nsecond needle", 1200)))
 	results, err := idx.Search("needle", "", 10)
 	require.NoError(t, err)
-	require.Len(t, results, 2)
-	var install SearchResult
-	for _, result := range results {
-		if result.SectionID == "section-2" {
-			install = result
-		}
-	}
-	require.Equal(t, "Guide / Install", install.Heading)
+	require.Len(t, results, 1)
+	require.Equal(t, "guide.md", results[0].Path)
 }

@@ -700,7 +700,7 @@ func (s *Service) Rebuild(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
-			if err := s.index.Upsert(rel, read.Content, read.Revision); err != nil {
+			if err := s.index.UpsertAt(rel, read.Content, read.Revision, obj.ModTime()); err != nil {
 				return err
 			}
 		}

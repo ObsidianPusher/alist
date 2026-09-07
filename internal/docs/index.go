@@ -67,7 +67,10 @@ func OpenIndex(dir string) (*Index, error) {
 }
 func (i *Index) Close() error { i.mu.Lock(); defer i.mu.Unlock(); return i.index.Close() }
 func (i *Index) Upsert(p, c, r string) error {
-	return i.Replace(p, r, time.Now(), ChunkMarkdown(c, defaultChunkChars))
+	return i.UpsertAt(p, c, r, time.Now())
+}
+func (i *Index) UpsertAt(p, c, r string, modified time.Time) error {
+	return i.Replace(p, r, modified, ChunkMarkdown(c, defaultChunkChars))
 }
 func (i *Index) Replace(p, revision string, modified time.Time, chunks []Chunk) error {
 	i.mu.Lock()
@@ -122,11 +125,16 @@ func (i *Index) Search(q, prefix string, limit int) ([]SearchResult, error) {
 		return nil, err
 	}
 	out := []SearchResult{}
+	seen := map[string]struct{}{}
 	for _, h := range res.Hits {
 		p, _ := h.Fields["path"].(string)
 		if prefix != "" && !strings.HasPrefix(p, prefix) {
 			continue
 		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
 		c, _ := h.Fields["content"].(string)
 		if len([]rune(c)) > 80 {
 			c = string([]rune(c)[:80])
@@ -136,7 +144,14 @@ func (i *Index) Search(q, prefix string, limit int) ([]SearchResult, error) {
 		heading, _ := h.Fields["heading"].(string)
 		start, _ := h.Fields["start"].(float64)
 		end, _ := h.Fields["end"].(float64)
-		out = append(out, SearchResult{Path: p, SectionID: sectionID, Heading: heading, Start: int(start), End: int(end), Snippet: c, Score: h.Score, Revision: r})
+		var modified time.Time
+		switch value := h.Fields["modified"].(type) {
+		case time.Time:
+			modified = value
+		case string:
+			modified, _ = time.Parse(time.RFC3339Nano, value)
+		}
+		out = append(out, SearchResult{Path: p, SectionID: sectionID, Heading: heading, Start: int(start), End: int(end), Snippet: c, Score: h.Score, Revision: r, Modified: modified})
 	}
 	return out, nil
 }
