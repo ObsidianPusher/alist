@@ -33,10 +33,11 @@ type ConflictError struct{ ActualRevision string }
 func (e *ConflictError) Error() string { return ErrConflict.Error() }
 
 type ReadResult struct {
-	Content   string `json:"content"`
-	Revision  string `json:"revision"`
-	Size      int64  `json:"size"`
-	Truncated bool   `json:"truncated"`
+	Content    string `json:"content"`
+	Revision   string `json:"revision"`
+	Size       int64  `json:"size"`
+	Truncated  bool   `json:"truncated"`
+	NextOffset int64  `json:"next_offset,omitempty"`
 }
 type HistoryResult struct {
 	Revision string `json:"revision"`
@@ -202,6 +203,9 @@ func (s *Service) ReadWithRevision(ctx context.Context, p string, offset, limit 
 		return ReadResult{}, fmt.Errorf("document is not valid UTF-8")
 	}
 	result := ReadResult{Content: string(b), Size: size, Truncated: truncated}
+	if truncated {
+		result.NextOffset = offset + int64(len(b))
+	}
 	if includeRevision {
 		all, _, _, err := s.readBytes(ctx, full, 0, size)
 		if err != nil {
@@ -520,7 +524,13 @@ func (s *Service) BatchEdit(ctx context.Context, edits []BatchEdit) (BatchResult
 }
 
 func (s *Service) Search(query, prefix string, limit int) ([]SearchResult, error) {
-	return s.index.Search(query, prefix, limit)
+	return s.SearchMode(query, prefix, "smart", limit)
+}
+func (s *Service) SearchMode(query, prefix, mode string, limit int) ([]SearchResult, error) {
+	if mode != "smart" && mode != "exact" && mode != "path" {
+		return nil, fmt.Errorf("invalid match mode")
+	}
+	return s.index.Search(query, prefix, mode, limit)
 }
 func (s *Service) Context(query, prefix string, budget int) (ContextResult, error) {
 	if budget <= 0 {

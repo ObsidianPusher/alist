@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/blevesearch/bleve/v2"
+	"github.com/blevesearch/bleve/v2/search/query"
 )
 
 type SearchResult struct {
@@ -106,7 +107,7 @@ func (i *Index) Delete(p string) error {
 	}
 	return i.index.Batch(batch)
 }
-func (i *Index) Search(q, prefix string, limit int) ([]SearchResult, error) {
+func (i *Index) Search(q, prefix, mode string, limit int) ([]SearchResult, error) {
 	if limit < 1 {
 		limit = 5
 	}
@@ -115,8 +116,25 @@ func (i *Index) Search(q, prefix string, limit int) ([]SearchResult, error) {
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	query := bleve.NewMatchQuery(q)
-	query.SetField("content")
+	var query query.Query
+	switch mode {
+	case "exact":
+		query = bleve.NewPhraseQuery(strings.Fields(q), "content")
+	case "path":
+		match := bleve.NewMatchQuery(q)
+		match.SetField("path")
+		query = match
+	default:
+		match := bleve.NewMatchQuery(q)
+		match.SetField("content")
+		query = match
+	}
+	if prefix != "" {
+		prefixQuery := bleve.NewPrefixQuery(prefix)
+		prefixQuery.SetField("path")
+		conjunction := bleve.NewConjunctionQuery(query, prefixQuery)
+		query = conjunction
+	}
 	req := bleve.NewSearchRequest(query)
 	req.Size = limit
 	req.Fields = []string{"path", "section_id", "heading", "start", "end", "revision", "modified", "content"}
@@ -128,9 +146,6 @@ func (i *Index) Search(q, prefix string, limit int) ([]SearchResult, error) {
 	seen := map[string]struct{}{}
 	for _, h := range res.Hits {
 		p, _ := h.Fields["path"].(string)
-		if prefix != "" && !strings.HasPrefix(p, prefix) {
-			continue
-		}
 		if _, ok := seen[p]; ok {
 			continue
 		}

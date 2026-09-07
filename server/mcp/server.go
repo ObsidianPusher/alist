@@ -22,6 +22,7 @@ type searchInput struct {
 	Query      string `json:"query"`
 	PathPrefix string `json:"path_prefix,omitempty"`
 	Limit      int    `json:"limit,omitempty"`
+	MatchMode  string `json:"match_mode,omitempty"`
 }
 type listInput struct {
 	PathPrefix string `json:"path_prefix,omitempty"`
@@ -192,7 +193,11 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	_, _ = svc.RebuildAsync(context.Background())
 	server := protocol.NewServer(&protocol.Implementation{Name: "alist-docs", Version: "1.0.0"}, nil)
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_search", Description: "Search document text by keywords"}, func(ctx context.Context, _ *protocol.CallToolRequest, in searchInput) (*protocol.CallToolResult, searchOutput, error) {
-		r, e := svc.Search(in.Query, in.PathPrefix, in.Limit)
+		mode := in.MatchMode
+		if mode == "" {
+			mode = "smart"
+		}
+		r, e := svc.SearchMode(in.Query, in.PathPrefix, mode, in.Limit)
 		return success(), searchOutput{Results: r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_context", Description: "Return search context within a fixed character budget"}, func(ctx context.Context, _ *protocol.CallToolRequest, in contextInput) (*protocol.CallToolResult, docs.ContextResult, error) {
@@ -213,6 +218,9 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read a document and its revision"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, docs.ReadResult, error) {
 		includeRevision := true
+		if in.Limit == 0 {
+			in.Limit = 4096
+		}
 		if in.IncludeRevision != nil {
 			includeRevision = *in.IncludeRevision
 		}
