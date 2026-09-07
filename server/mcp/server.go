@@ -60,6 +60,15 @@ type sectionUpdateInput struct {
 	Content          string `json:"content"`
 	ExpectedRevision string `json:"expected_revision"`
 }
+type outlineInput struct {
+	Path string `json:"path"`
+}
+type appendInput struct {
+	Path             string `json:"path"`
+	SectionID        string `json:"section_id"`
+	Content          string `json:"content"`
+	ExpectedRevision string `json:"expected_revision"`
+}
 type deleteInput struct {
 	Path             string `json:"path"`
 	ExpectedRevision string `json:"expected_revision"`
@@ -169,6 +178,14 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read a document and its revision"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, docs.ReadResult, error) {
 		r, e := svc.Read(ctx, in.Path, in.Offset, in.Limit)
 		return nil, r, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_outline", Description: "Read compact Markdown section outline"}, func(ctx context.Context, _ *protocol.CallToolRequest, in outlineInput) (*protocol.CallToolResult, docs.OutlineResult, error) {
+		r, e := svc.Outline(ctx, in.Path)
+		return nil, r, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_append", Description: "Append text to a Markdown section"}, func(ctx context.Context, _ *protocol.CallToolRequest, in appendInput) (*protocol.CallToolResult, map[string]string, error) {
+		r, e := svc.Append(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
+		return nil, map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read_section", Description: "Read a Markdown section and adjacent chunks"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readSectionInput) (*protocol.CallToolResult, docs.SectionResult, error) {
 		r, e := svc.ReadSection(ctx, in.Path, in.SectionID, in.Adjacent)

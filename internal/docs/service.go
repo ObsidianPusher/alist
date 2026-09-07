@@ -65,6 +65,11 @@ type IndexStatus struct {
 	Failed      int       `json:"failed"`
 	LastSuccess time.Time `json:"last_success,omitempty"`
 }
+type OutlineResult struct {
+	Path     string  `json:"path"`
+	Revision string  `json:"revision"`
+	Sections []Chunk `json:"sections"`
+}
 
 type Service struct {
 	config   conf.MCPConfig
@@ -219,6 +224,29 @@ func (s *Service) Replace(ctx context.Context, p, oldText, newText, expected str
 	}
 	next := strings.Replace(current.Content, oldText, newText, 1)
 	return s.Update(ctx, p, next, &expected)
+}
+func (s *Service) Outline(ctx context.Context, p string) (OutlineResult, error) {
+	read, err := s.Read(ctx, p, 0, 0)
+	if err != nil {
+		return OutlineResult{}, err
+	}
+	return OutlineResult{Path: p, Revision: read.Revision, Sections: ChunkMarkdown(read.Content, defaultChunkChars)}, nil
+}
+func (s *Service) Append(ctx context.Context, p, sectionID, content, expected string) (string, error) {
+	current, err := s.Read(ctx, p, 0, 0)
+	if err != nil {
+		return "", err
+	}
+	if current.Revision != expected {
+		return "", &ConflictError{ActualRevision: current.Revision}
+	}
+	for _, chunk := range ChunkMarkdown(current.Content, defaultChunkChars) {
+		if chunk.ID == sectionID {
+			next := current.Content[:chunk.End] + "\n" + content + current.Content[chunk.End:]
+			return s.Update(ctx, p, next, &expected)
+		}
+	}
+	return "", fmt.Errorf("document section not found")
 }
 
 func (s *Service) UpdateSection(ctx context.Context, p, sectionID, content, expected string) (string, error) {

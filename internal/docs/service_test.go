@@ -95,6 +95,19 @@ func TestReplaceRejectsAmbiguousText(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestOutlineAndAppendAvoidFullDocumentEdits(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "# Guide\nintro", &before.Revision)
+	require.NoError(t, err)
+	outline, err := svc.Outline(context.Background(), "README.md")
+	require.NoError(t, err)
+	require.Equal(t, "Guide", outline.Sections[0].Heading)
+	_, err = svc.Append(context.Background(), "README.md", "section-1", "more", outline.Revision)
+	require.NoError(t, err)
+}
+
 func documentPaths(items []DocumentInfo) []string {
 	paths := make([]string, 0, len(items))
 	for _, item := range items {
