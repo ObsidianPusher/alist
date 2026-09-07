@@ -201,6 +201,102 @@ func (s *Service) Update(ctx context.Context, p, content string, expected *strin
 	}
 	return next, nil
 }
+
+// Replace changes exactly one occurrence, so callers only send the local edit.
+func (s *Service) Replace(ctx context.Context, p, oldText, newText, expected string) (string, error) {
+	if oldText == "" {
+		return "", fmt.Errorf("old_text is required")
+	}
+	current, err := s.Read(ctx, p, 0, 0)
+	if err != nil {
+		return "", err
+	}
+	if current.Revision != expected {
+		return "", &ConflictError{ActualRevision: current.Revision}
+	}
+	if strings.Count(current.Content, oldText) != 1 {
+		return "", fmt.Errorf("old_text must occur exactly once")
+	}
+	next := strings.Replace(current.Content, oldText, newText, 1)
+	return s.Update(ctx, p, next, &expected)
+}
+
+func (s *Service) UpdateSection(ctx context.Context, p, sectionID, content, expected string) (string, error) {
+	current, err := s.Read(ctx, p, 0, 0)
+	if err != nil {
+		return "", err
+	}
+	if current.Revision != expected {
+		return "", &ConflictError{ActualRevision: current.Revision}
+	}
+	for _, chunk := range ChunkMarkdown(current.Content, defaultChunkChars) {
+		if chunk.ID != sectionID {
+			continue
+		}
+		next := current.Content[:chunk.Start] + content + current.Content[chunk.End:]
+		return s.Update(ctx, p, next, &expected)
+	}
+	return "", fmt.Errorf("document section not found")
+}
+
+// Patch applies a restricted unified diff to one Markdown document. File header
+// lines are ignored; every hunk must match exactly once in the current content.
+func (s *Service) Patch(ctx context.Context, p, patch, expected string) (string, error) {
+	current, err := s.Read(ctx, p, 0, 0)
+	if err != nil {
+		return "", err
+	}
+	if current.Revision != expected {
+		return "", &ConflictError{ActualRevision: current.Revision}
+	}
+	next, err := applyUnifiedPatch(current.Content, patch)
+	if err != nil {
+		return "", err
+	}
+	return s.Update(ctx, p, next, &expected)
+}
+
+func applyUnifiedPatch(content, patch string) (string, error) {
+	var oldLines, newLines []string
+	apply := func() error {
+		if len(oldLines) == 0 {
+			return nil
+		}
+		old, next := strings.Join(oldLines, "\n"), strings.Join(newLines, "\n")
+		if strings.Count(content, old) != 1 {
+			return fmt.Errorf("patch hunk must match exactly once")
+		}
+		content = strings.Replace(content, old, next, 1)
+		oldLines, newLines = nil, nil
+		return nil
+	}
+	for _, line := range strings.Split(patch, "\n") {
+		if strings.HasPrefix(line, "@@") {
+			if err := apply(); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || line == "" {
+			continue
+		}
+		switch line[0] {
+		case ' ':
+			oldLines = append(oldLines, line[1:])
+			newLines = append(newLines, line[1:])
+		case '-':
+			oldLines = append(oldLines, line[1:])
+		case '+':
+			newLines = append(newLines, line[1:])
+		default:
+			return "", fmt.Errorf("invalid unified diff line")
+		}
+	}
+	if err := apply(); err != nil {
+		return "", err
+	}
+	return content, nil
+}
 func (s *Service) Delete(ctx context.Context, p string, expected string) error {
 	old, err := s.Read(ctx, p, 0, 0)
 	if err != nil {

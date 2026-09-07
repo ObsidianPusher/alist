@@ -26,3 +26,19 @@ func TestRebuildAsyncPublishesCompletedStatus(t *testing.T) {
 	require.Equal(t, generation, svc.Status().Generation)
 	require.GreaterOrEqual(t, svc.Status().Documents, 2)
 }
+
+func TestUpdateSectionReplacesOnlySelectedMarkdownChunk(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "# One\nfirst\n\n# Two\nsecond", &before.Revision)
+	require.NoError(t, err)
+	read, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.UpdateSection(context.Background(), "README.md", "section-2", "changed", read.Revision)
+	require.NoError(t, err)
+	updated, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	require.Contains(t, updated.Content, "first")
+	require.Contains(t, updated.Content, "changed")
+}

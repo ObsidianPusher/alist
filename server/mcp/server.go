@@ -43,6 +43,23 @@ type updateInput struct {
 	Content          string  `json:"content"`
 	ExpectedRevision *string `json:"expected_revision"`
 }
+type replaceInput struct {
+	Path             string `json:"path"`
+	OldText          string `json:"old_text"`
+	NewText          string `json:"new_text"`
+	ExpectedRevision string `json:"expected_revision"`
+}
+type patchInput struct {
+	Path             string `json:"path"`
+	Patch            string `json:"patch"`
+	ExpectedRevision string `json:"expected_revision"`
+}
+type sectionUpdateInput struct {
+	Path             string `json:"path"`
+	SectionID        string `json:"section_id"`
+	Content          string `json:"content"`
+	ExpectedRevision string `json:"expected_revision"`
+}
 type deleteInput struct {
 	Path             string `json:"path"`
 	ExpectedRevision string `json:"expected_revision"`
@@ -166,6 +183,18 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_update", Description: "Create or conditionally replace a document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in updateInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.Update(ctx, in.Path, in.Content, in.ExpectedRevision)
+		return nil, map[string]string{"revision": r}, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_replace", Description: "Replace one unique text fragment without sending the whole document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in replaceInput) (*protocol.CallToolResult, map[string]string, error) {
+		r, e := svc.Replace(ctx, in.Path, in.OldText, in.NewText, in.ExpectedRevision)
+		return nil, map[string]string{"revision": r}, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_section_update", Description: "Replace one indexed Markdown section"}, func(ctx context.Context, _ *protocol.CallToolRequest, in sectionUpdateInput) (*protocol.CallToolResult, map[string]string, error) {
+		r, e := svc.UpdateSection(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
+		return nil, map[string]string{"revision": r}, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_patch", Description: "Apply a restricted unified diff"}, func(ctx context.Context, _ *protocol.CallToolRequest, in patchInput) (*protocol.CallToolResult, map[string]string, error) {
+		r, e := svc.Patch(ctx, in.Path, in.Patch, in.ExpectedRevision)
 		return nil, map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_delete", Description: "Conditionally delete a document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in deleteInput) (*protocol.CallToolResult, map[string]string, error) {

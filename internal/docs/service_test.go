@@ -71,6 +71,30 @@ func TestListPaginatesAfterCursor(t *testing.T) {
 	require.Equal(t, []string{"guides/intro.md"}, documentPaths(second.Items))
 }
 
+func TestReplaceEditsUniqueTextWithoutSendingWholeDocument(t *testing.T) {
+	svc := setupListService(t)
+	read, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	next, err := svc.Replace(context.Background(), "README.md", "root", "updated", read.Revision)
+	require.NoError(t, err)
+	require.NotEqual(t, read.Revision, next)
+	changed, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, "updated", changed.Content)
+}
+
+func TestReplaceRejectsAmbiguousText(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "repeat repeat", &before.Revision)
+	require.NoError(t, err)
+	read, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Replace(context.Background(), "README.md", "repeat", "changed", read.Revision)
+	require.Error(t, err)
+}
+
 func documentPaths(items []DocumentInfo) []string {
 	paths := make([]string, 0, len(items))
 	for _, item := range items {
