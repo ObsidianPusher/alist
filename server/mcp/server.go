@@ -69,6 +69,11 @@ type appendInput struct {
 	Content          string `json:"content"`
 	ExpectedRevision string `json:"expected_revision"`
 }
+type contextInput struct {
+	Query       string `json:"query"`
+	PathPrefix  string `json:"path_prefix,omitempty"`
+	BudgetChars int    `json:"budget_chars,omitempty"`
+}
 type deleteInput struct {
 	Path             string `json:"path"`
 	ExpectedRevision string `json:"expected_revision"`
@@ -170,6 +175,10 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_search", Description: "Search document text by keywords"}, func(ctx context.Context, _ *protocol.CallToolRequest, in searchInput) (*protocol.CallToolResult, searchOutput, error) {
 		r, e := svc.Search(in.Query, in.PathPrefix, in.Limit)
 		return nil, searchOutput{Results: r}, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_context", Description: "Return search context within a fixed character budget"}, func(ctx context.Context, _ *protocol.CallToolRequest, in contextInput) (*protocol.CallToolResult, docs.ContextResult, error) {
+		r, e := svc.Context(in.Query, in.PathPrefix, in.BudgetChars)
+		return nil, r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List documents under the configured root"}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
 		r, e := svc.List(ctx, in.PathPrefix, in.Cursor, in.Limit)

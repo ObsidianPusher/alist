@@ -42,3 +42,14 @@ func TestUpdateSectionReplacesOnlySelectedMarkdownChunk(t *testing.T) {
 	require.Contains(t, updated.Content, "first")
 	require.Contains(t, updated.Content, "changed")
 }
+
+func TestContextCapsReturnedCharacters(t *testing.T) {
+	svc := setupListService(t)
+	read, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "needle one\n\nneedle two", &read.Revision)
+	require.NoError(t, err)
+	context, err := svc.Context("needle", "", 10)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len([]rune(context.Content)), 10)
+}

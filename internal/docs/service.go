@@ -76,6 +76,10 @@ type OutlineSection struct {
 	Ordinal int    `json:"ordinal"`
 	Chars   int    `json:"chars"`
 }
+type ContextResult struct {
+	Content string         `json:"content"`
+	Results []SearchResult `json:"results"`
+}
 
 type Service struct {
 	config   conf.MCPConfig
@@ -412,6 +416,36 @@ func (s *Service) History(p, rev string) ([]HistoryResult, error) {
 
 func (s *Service) Search(query, prefix string, limit int) ([]SearchResult, error) {
 	return s.index.Search(query, prefix, limit)
+}
+func (s *Service) Context(query, prefix string, budget int) (ContextResult, error) {
+	if budget <= 0 {
+		budget = 1600
+	}
+	if budget > 4000 {
+		budget = 4000
+	}
+	results, err := s.Search(query, prefix, 5)
+	if err != nil {
+		return ContextResult{}, err
+	}
+	var parts []string
+	used := 0
+	for _, result := range results {
+		text := result.Snippet
+		runes := []rune(text)
+		if used+len(runes) > budget {
+			runes = runes[:budget-used]
+		}
+		if len(runes) == 0 {
+			break
+		}
+		parts = append(parts, string(runes))
+		used += len(runes)
+		if used >= budget {
+			break
+		}
+	}
+	return ContextResult{Content: strings.Join(parts, "\n\n"), Results: results}, nil
 }
 
 func (s *Service) ReadSection(ctx context.Context, p, sectionID string, adjacent int) (SectionResult, error) {
