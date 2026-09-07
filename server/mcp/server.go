@@ -81,6 +81,13 @@ type contextInput struct {
 	PathPrefix  string `json:"path_prefix,omitempty"`
 	BudgetChars int    `json:"budget_chars,omitempty"`
 }
+type diffInput struct {
+	Path         string `json:"path"`
+	FromRevision string `json:"from_revision"`
+}
+type batchInput struct {
+	Edits []docs.BatchEdit `json:"edits"`
+}
 type deleteInput struct {
 	Path             string `json:"path"`
 	ExpectedRevision string `json:"expected_revision"`
@@ -186,6 +193,14 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_context", Description: "Return search context within a fixed character budget"}, func(ctx context.Context, _ *protocol.CallToolRequest, in contextInput) (*protocol.CallToolResult, docs.ContextResult, error) {
 		r, e := svc.Context(in.Query, in.PathPrefix, in.BudgetChars)
+		return nil, r, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_diff", Description: "Compare a historical snapshot with the current document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in diffInput) (*protocol.CallToolResult, docs.DiffResult, error) {
+		r, e := svc.Diff(ctx, in.Path, in.FromRevision)
+		return nil, r, e
+	})
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_batch_edit", Description: "Prevalidate and apply up to 20 one-per-document edits"}, func(ctx context.Context, _ *protocol.CallToolRequest, in batchInput) (*protocol.CallToolResult, docs.BatchResult, error) {
+		r, e := svc.BatchEdit(ctx, in.Edits)
 		return nil, r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List documents under the configured root"}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {

@@ -80,6 +80,26 @@ type ContextResult struct {
 	Content string         `json:"content"`
 	Results []SearchResult `json:"results"`
 }
+type DiffResult struct {
+	FromRevision string `json:"from_revision"`
+	Revision     string `json:"revision"`
+	Patch        string `json:"patch"`
+}
+type BatchEdit struct {
+	Kind             string `json:"kind"`
+	Path             string `json:"path"`
+	ExpectedRevision string `json:"expected_revision"`
+	OldText          string `json:"old_text,omitempty"`
+	NewText          string `json:"new_text,omitempty"`
+	SectionID        string `json:"section_id,omitempty"`
+	Content          string `json:"content,omitempty"`
+	Anchor           string `json:"anchor,omitempty"`
+	Patch            string `json:"patch,omitempty"`
+}
+type BatchResult struct {
+	Completed []string          `json:"completed"`
+	Revisions map[string]string `json:"revisions"`
+}
 
 type Service struct {
 	config   conf.MCPConfig
@@ -436,6 +456,67 @@ func (s *Service) History(p, rev string, includeContent bool) ([]HistoryResult, 
 		out = append(out, r)
 	}
 	return out, nil
+}
+func (s *Service) Diff(ctx context.Context, p, fromRevision string) (DiffResult, error) {
+	history, err := s.History(p, fromRevision, true)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	if len(history) != 1 {
+		return DiffResult{}, fmt.Errorf("historical revision not found")
+	}
+	current, err := s.Read(ctx, p, 0, 0)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	if history[0].Content == current.Content {
+		return DiffResult{FromRevision: fromRevision, Revision: current.Revision}, nil
+	}
+	return DiffResult{FromRevision: fromRevision, Revision: current.Revision, Patch: "--- previous\n+++ current\n@@\n-" + strings.ReplaceAll(history[0].Content, "\n", "\n-") + "\n+" + strings.ReplaceAll(current.Content, "\n", "\n+")}, nil
+}
+func (s *Service) BatchEdit(ctx context.Context, edits []BatchEdit) (BatchResult, error) {
+	if len(edits) == 0 || len(edits) > 20 {
+		return BatchResult{}, fmt.Errorf("batch must contain 1 to 20 edits")
+	}
+	seen := map[string]bool{}
+	for _, edit := range edits {
+		if seen[edit.Path] {
+			return BatchResult{}, fmt.Errorf("only one edit per document is allowed")
+		}
+		seen[edit.Path] = true
+		current, err := s.Read(ctx, edit.Path, 0, 0)
+		if err != nil {
+			return BatchResult{}, err
+		}
+		if current.Revision != edit.ExpectedRevision {
+			return BatchResult{}, &ConflictError{ActualRevision: current.Revision}
+		}
+	}
+	result := BatchResult{Revisions: map[string]string{}}
+	for _, edit := range edits {
+		var rev string
+		var err error
+		switch edit.Kind {
+		case "replace":
+			rev, err = s.Replace(ctx, edit.Path, edit.OldText, edit.NewText, edit.ExpectedRevision)
+		case "append":
+			rev, err = s.Append(ctx, edit.Path, edit.SectionID, edit.Content, edit.ExpectedRevision)
+		case "section_update":
+			rev, err = s.UpdateSection(ctx, edit.Path, edit.SectionID, edit.Content, edit.ExpectedRevision)
+		case "insert_after":
+			rev, err = s.InsertAfter(ctx, edit.Path, edit.Anchor, edit.Content, edit.ExpectedRevision)
+		case "patch":
+			rev, err = s.Patch(ctx, edit.Path, edit.Patch, edit.ExpectedRevision)
+		default:
+			return result, fmt.Errorf("unsupported batch edit kind")
+		}
+		if err != nil {
+			return result, err
+		}
+		result.Completed = append(result.Completed, edit.Path)
+		result.Revisions[edit.Path] = rev
+	}
+	return result, nil
 }
 
 func (s *Service) Search(query, prefix string, limit int) ([]SearchResult, error) {
