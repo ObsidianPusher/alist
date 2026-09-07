@@ -66,9 +66,15 @@ type IndexStatus struct {
 	LastSuccess time.Time `json:"last_success,omitempty"`
 }
 type OutlineResult struct {
-	Path     string  `json:"path"`
-	Revision string  `json:"revision"`
-	Sections []Chunk `json:"sections"`
+	Path     string           `json:"path"`
+	Revision string           `json:"revision"`
+	Sections []OutlineSection `json:"sections"`
+}
+type OutlineSection struct {
+	ID      string `json:"section_id"`
+	Heading string `json:"heading,omitempty"`
+	Ordinal int    `json:"ordinal"`
+	Chars   int    `json:"chars"`
 }
 
 type Service struct {
@@ -230,7 +236,12 @@ func (s *Service) Outline(ctx context.Context, p string) (OutlineResult, error) 
 	if err != nil {
 		return OutlineResult{}, err
 	}
-	return OutlineResult{Path: p, Revision: read.Revision, Sections: ChunkMarkdown(read.Content, defaultChunkChars)}, nil
+	chunks := ChunkMarkdown(read.Content, defaultChunkChars)
+	sections := make([]OutlineSection, 0, len(chunks))
+	for _, chunk := range chunks {
+		sections = append(sections, OutlineSection{ID: chunk.ID, Heading: chunk.Heading, Ordinal: chunk.Ordinal, Chars: len([]rune(chunk.Content))})
+	}
+	return OutlineResult{Path: p, Revision: read.Revision, Sections: sections}, nil
 }
 func (s *Service) Append(ctx context.Context, p, sectionID, content, expected string) (string, error) {
 	current, err := s.Read(ctx, p, 0, 0)

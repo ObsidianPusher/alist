@@ -104,6 +104,7 @@ func TestOutlineAndAppendAvoidFullDocumentEdits(t *testing.T) {
 	outline, err := svc.Outline(context.Background(), "README.md")
 	require.NoError(t, err)
 	require.Equal(t, "Guide", outline.Sections[0].Heading)
+	require.Equal(t, len("intro"), outline.Sections[0].Chars)
 	_, err = svc.Append(context.Background(), "README.md", "section-1", "more", outline.Revision)
 	require.NoError(t, err)
 }
