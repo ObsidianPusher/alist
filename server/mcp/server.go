@@ -116,6 +116,10 @@ type rebuildOutput struct {
 	Generation string `json:"generation"`
 }
 
+func success() *protocol.CallToolResult {
+	return &protocol.CallToolResult{Content: []protocol.Content{}}
+}
+
 type runtimeState struct {
 	handler   http.Handler
 	svc       *docs.Service
@@ -189,23 +193,23 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	server := protocol.NewServer(&protocol.Implementation{Name: "alist-docs", Version: "1.0.0"}, nil)
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_search", Description: "Search document text by keywords"}, func(ctx context.Context, _ *protocol.CallToolRequest, in searchInput) (*protocol.CallToolResult, searchOutput, error) {
 		r, e := svc.Search(in.Query, in.PathPrefix, in.Limit)
-		return nil, searchOutput{Results: r}, e
+		return success(), searchOutput{Results: r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_context", Description: "Return search context within a fixed character budget"}, func(ctx context.Context, _ *protocol.CallToolRequest, in contextInput) (*protocol.CallToolResult, docs.ContextResult, error) {
 		r, e := svc.Context(in.Query, in.PathPrefix, in.BudgetChars)
-		return nil, r, e
+		return success(), r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_diff", Description: "Compare a historical snapshot with the current document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in diffInput) (*protocol.CallToolResult, docs.DiffResult, error) {
 		r, e := svc.Diff(ctx, in.Path, in.FromRevision)
-		return nil, r, e
+		return success(), r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_batch_edit", Description: "Prevalidate and apply up to 20 one-per-document edits"}, func(ctx context.Context, _ *protocol.CallToolRequest, in batchInput) (*protocol.CallToolResult, docs.BatchResult, error) {
 		r, e := svc.BatchEdit(ctx, in.Edits)
-		return nil, r, e
+		return success(), r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List documents under the configured root"}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
 		r, e := svc.List(ctx, in.PathPrefix, in.Cursor, in.Limit)
-		return nil, listOutput(r), e
+		return success(), listOutput(r), e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read a document and its revision"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, docs.ReadResult, error) {
 		includeRevision := true
@@ -213,58 +217,58 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 			includeRevision = *in.IncludeRevision
 		}
 		r, e := svc.ReadWithRevision(ctx, in.Path, in.Offset, in.Limit, includeRevision)
-		return nil, r, e
+		return success(), r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_outline", Description: "Read compact Markdown section outline"}, func(ctx context.Context, _ *protocol.CallToolRequest, in outlineInput) (*protocol.CallToolResult, docs.OutlineResult, error) {
 		r, e := svc.Outline(ctx, in.Path)
-		return nil, r, e
+		return success(), r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_append", Description: "Append text to a Markdown section"}, func(ctx context.Context, _ *protocol.CallToolRequest, in appendInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.Append(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
-		return nil, map[string]string{"revision": r}, e
+		return success(), map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_insert_after", Description: "Insert text after one unique anchor"}, func(ctx context.Context, _ *protocol.CallToolRequest, in insertAfterInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.InsertAfter(ctx, in.Path, in.Anchor, in.Content, in.ExpectedRevision)
-		return nil, map[string]string{"revision": r}, e
+		return success(), map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_read_section", Description: "Read a Markdown section and adjacent chunks"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readSectionInput) (*protocol.CallToolResult, docs.SectionResult, error) {
 		r, e := svc.ReadSection(ctx, in.Path, in.SectionID, in.Adjacent)
-		return nil, r, e
+		return success(), r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_index_status", Description: "Get Markdown index status"}, func(context.Context, *protocol.CallToolRequest, struct{}) (*protocol.CallToolResult, docs.IndexStatus, error) {
-		return nil, svc.Status(), nil
+		return success(), svc.Status(), nil
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_rebuild_index", Description: "Rebuild the Markdown index"}, func(ctx context.Context, _ *protocol.CallToolRequest, _ struct{}) (*protocol.CallToolResult, rebuildOutput, error) {
 		generation, e := svc.RebuildAsync(ctx)
-		return nil, rebuildOutput{Generation: generation}, e
+		return success(), rebuildOutput{Generation: generation}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_update", Description: "Create or conditionally replace a document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in updateInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.Update(ctx, in.Path, in.Content, in.ExpectedRevision)
-		return nil, map[string]string{"revision": r}, e
+		return success(), map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_replace", Description: "Replace one unique text fragment without sending the whole document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in replaceInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.Replace(ctx, in.Path, in.OldText, in.NewText, in.ExpectedRevision)
-		return nil, map[string]string{"revision": r}, e
+		return success(), map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_section_update", Description: "Replace one indexed Markdown section"}, func(ctx context.Context, _ *protocol.CallToolRequest, in sectionUpdateInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.UpdateSection(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
-		return nil, map[string]string{"revision": r}, e
+		return success(), map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_patch", Description: "Apply a restricted unified diff"}, func(ctx context.Context, _ *protocol.CallToolRequest, in patchInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.Patch(ctx, in.Path, in.Patch, in.ExpectedRevision)
-		return nil, map[string]string{"revision": r}, e
+		return success(), map[string]string{"revision": r}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_delete", Description: "Conditionally delete a document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in deleteInput) (*protocol.CallToolResult, map[string]string, error) {
 		e := svc.Delete(ctx, in.Path, in.ExpectedRevision)
-		return nil, map[string]string{"status": "deleted"}, e
+		return success(), map[string]string{"status": "deleted"}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_move", Description: "Conditionally move or rename a document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in moveInput) (*protocol.CallToolResult, map[string]string, error) {
 		e := svc.Move(ctx, in.From, in.To, in.ExpectedRevision)
-		return nil, map[string]string{"status": "moved"}, e
+		return success(), map[string]string{"status": "moved"}, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_history", Description: "List document history or retrieve a historical snapshot"}, func(ctx context.Context, _ *protocol.CallToolRequest, in historyInput) (*protocol.CallToolResult, historyOutput, error) {
 		r, e := svc.History(in.Path, in.Revision, in.IncludeContent)
-		return nil, historyOutput{Items: r}, e
+		return success(), historyOutput{Items: r}, e
 	})
 	h := protocol.NewStreamableHTTPHandler(func(*http.Request) *protocol.Server { return server }, &protocol.StreamableHTTPOptions{JSONResponse: true})
 	return &runtimeState{handler: auth(config, h), svc: svc}, nil
