@@ -31,3 +31,22 @@ func normalizeMarkdownEncoding(raw []byte) ([]byte, bool, error) {
 	}
 	return decoded, true, nil
 }
+
+// trimIncompleteUTF8Suffix removes only a partial final UTF-8 rune. A byte
+// limited read can end midway through a Chinese character; treating that page
+// as GB18030 would corrupt every preceding UTF-8 character.
+func trimIncompleteUTF8Suffix(raw []byte) []byte {
+	if utf8.Valid(raw) {
+		return raw
+	}
+	start := len(raw) - utf8.UTFMax + 1
+	if start < 0 {
+		start = 0
+	}
+	for ; start < len(raw); start++ {
+		if utf8.Valid(raw[:start]) && utf8.RuneStart(raw[start]) && !utf8.FullRune(raw[start:]) {
+			return raw[:start]
+		}
+	}
+	return raw
+}

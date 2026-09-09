@@ -199,6 +199,9 @@ func (s *Service) ReadWithRevision(ctx context.Context, p string, offset, limit 
 	if err != nil {
 		return ReadResult{}, err
 	}
+	if truncated {
+		b = trimIncompleteUTF8Suffix(b)
+	}
 	normalized, changed, err := normalizeMarkdownEncoding(b)
 	if err != nil {
 		return ReadResult{}, err

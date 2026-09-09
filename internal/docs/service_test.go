@@ -83,6 +83,24 @@ func TestReplaceEditsUniqueTextWithoutSendingWholeDocument(t *testing.T) {
 	require.Equal(t, "updated", changed.Content)
 }
 
+func TestReadTruncatesUTF8AtCharacterBoundary(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "a益", &before.Revision)
+	require.NoError(t, err)
+
+	page, err := svc.Read(context.Background(), "README.md", 0, 2)
+	require.NoError(t, err)
+	require.Equal(t, "a", page.Content)
+	require.True(t, page.Truncated)
+	require.EqualValues(t, 1, page.NextOffset)
+
+	next, err := svc.Read(context.Background(), "README.md", page.NextOffset, 3)
+	require.NoError(t, err)
+	require.Equal(t, "益", next.Content)
+}
+
 func TestReplaceRejectsAmbiguousText(t *testing.T) {
 	svc := setupListService(t)
 	before, err := svc.Read(context.Background(), "README.md", 0, 0)
