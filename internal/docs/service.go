@@ -199,8 +199,19 @@ func (s *Service) ReadWithRevision(ctx context.Context, p string, offset, limit 
 	if err != nil {
 		return ReadResult{}, err
 	}
-	if !utf8.Valid(b) {
-		return ReadResult{}, fmt.Errorf("document is not valid UTF-8")
+	normalized, changed, err := normalizeMarkdownEncoding(b)
+	if err != nil {
+		return ReadResult{}, err
+	}
+	b = normalized
+	if changed && offset == 0 && !truncated {
+		// Read-triggered maintenance keeps the document library canonical.
+		file := &stream.FileStream{Obj: &model.Object{Name: path.Base(full), Size: int64(len(b))}, Reader: bytes.NewReader(b), Mimetype: "text/markdown"}
+		if err := fs.PutDirectly(ctx, path.Dir(full), file); err != nil {
+			return ReadResult{}, err
+		}
+		s.index.Upsert(p, string(b), revision(b))
+		size = int64(len(b))
 	}
 	result := ReadResult{Content: string(b), Size: size, Truncated: truncated}
 	if truncated {
