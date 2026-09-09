@@ -14,6 +14,7 @@ import (
 
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/docs"
+	"github.com/alist-org/alist/v3/pkg/utils"
 	"github.com/gin-gonic/gin"
 	protocol "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -122,12 +123,15 @@ func success() *protocol.CallToolResult {
 }
 
 type runtimeState struct {
-	handler   http.Handler
-	svc       *docs.Service
-	requests  atomic.Int64
-	retired   atomic.Bool
-	closeOnce sync.Once
+	handler         http.Handler
+	svc             *docs.Service
+	maintenanceStop chan struct{}
+	requests        atomic.Int64
+	retired         atomic.Bool
+	closeOnce       sync.Once
 }
+
+const encodingMaintenanceInterval = 6 * time.Hour
 
 func (s *runtimeState) release() {
 	if s.requests.Add(-1) == 0 && s.retired.Load() {
@@ -140,7 +144,34 @@ func (s *runtimeState) retire() {
 		s.close()
 	}
 }
-func (s *runtimeState) close() { s.closeOnce.Do(func() { _ = s.svc.Close() }) }
+func (s *runtimeState) close() {
+	s.closeOnce.Do(func() {
+		if s.maintenanceStop != nil {
+			close(s.maintenanceStop)
+		}
+		if s.svc != nil {
+			_ = s.svc.Close()
+		}
+	})
+}
+
+func (s *runtimeState) startMaintenance() {
+	if s.maintenanceStop == nil || s.svc == nil {
+		return
+	}
+	utils.GoSafe("mcp-document-maintenance", func() {
+		ticker := time.NewTicker(encodingMaintenanceInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				_, _ = s.svc.RebuildAsync(context.Background())
+			case <-s.maintenanceStop:
+				return
+			}
+		}
+	})
+}
 
 var active atomic.Pointer[runtimeState]
 
@@ -279,7 +310,9 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 		return success(), historyOutput{Items: r}, e
 	})
 	h := protocol.NewStreamableHTTPHandler(func(*http.Request) *protocol.Server { return server }, &protocol.StreamableHTTPOptions{JSONResponse: true})
-	return &runtimeState{handler: auth(config, h), svc: svc}, nil
+	state := &runtimeState{handler: auth(config, h), svc: svc, maintenanceStop: make(chan struct{})}
+	state.startMaintenance()
+	return state, nil
 }
 
 func auth(config conf.MCPConfig, next http.Handler) http.Handler {

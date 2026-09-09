@@ -20,3 +20,14 @@ func TestMCPRejectsMissingBearerToken(t *testing.T) {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}
 }
+
+func TestRuntimeCloseStopsMaintenance(t *testing.T) {
+	stop := make(chan struct{})
+	state := runtimeState{maintenanceStop: stop}
+	state.close()
+	select {
+	case <-stop:
+	default:
+		t.Fatal("maintenance loop was not stopped")
+	}
+}

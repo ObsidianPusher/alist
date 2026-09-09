@@ -63,6 +63,8 @@ type IndexStatus struct {
 	Running     bool      `json:"running"`
 	Documents   int       `json:"documents"`
 	Chunks      int       `json:"chunks"`
+	Scanned     int       `json:"scanned"`
+	Normalized  int       `json:"normalized"`
 	Failed      int       `json:"failed"`
 	LastSuccess time.Time `json:"last_success,omitempty"`
 }
@@ -110,8 +112,9 @@ type Service struct {
 }
 
 type canonicalDocument struct {
-	content []byte
-	size    int64
+	content    []byte
+	size       int64
+	normalized bool
 }
 
 func New(config conf.MCPConfig) (*Service, error) {
@@ -240,7 +243,7 @@ func (s *Service) loadCanonical(ctx context.Context, p, full string) (canonicalD
 			return canonicalDocument{}, err
 		}
 	}
-	return canonicalDocument{content: content, size: int64(len(content))}, nil
+	return canonicalDocument{content: content, size: int64(len(content)), normalized: changed}, nil
 }
 
 func paginateUTF8(content []byte, offset, limit, max int64) ([]byte, int64, bool, error) {
@@ -511,7 +514,11 @@ func (s *Service) History(p, rev string, includeContent bool) ([]HistoryResult, 
 			if e != nil {
 				return nil, e
 			}
-			r.Content = string(b)
+			content, _, e := normalizeMarkdownEncoding(b)
+			if e != nil {
+				return nil, e
+			}
+			r.Content = string(content)
 		}
 		out = append(out, r)
 	}
@@ -660,9 +667,9 @@ func (s *Service) RebuildAsync(ctx context.Context) (string, error) {
 	s.status = IndexStatus{Generation: generation, Running: true}
 	s.statusMu.Unlock()
 	go func() {
-		err := s.Rebuild(ctx)
+		maintenance, err := s.rebuild(ctx)
 		listed, listErr := s.List(context.Background(), "", "", 100000)
-		status := IndexStatus{Generation: generation, Documents: len(listed.Items)}
+		status := IndexStatus{Generation: generation, Documents: len(listed.Items), Scanned: maintenance.scanned, Normalized: maintenance.normalized, Failed: maintenance.failed}
 		if err == nil && listErr == nil {
 			status.LastSuccess = time.Now()
 			for _, item := range listed.Items {
@@ -674,7 +681,9 @@ func (s *Service) RebuildAsync(ctx context.Context) (string, error) {
 				status.Chunks += len(ChunkMarkdown(read.Content, defaultChunkChars))
 			}
 		} else {
-			status.Failed = 1
+			if status.Failed == 0 {
+				status.Failed = 1
+			}
 		}
 		s.statusMu.Lock()
 		s.status = status
@@ -743,7 +752,19 @@ func (s *Service) List(ctx context.Context, prefix, cursor string, limit int) (L
 // Rebuild indexes every eligible document below the configured root. Files larger
 // than the configured read limit are intentionally skipped: they cannot be read
 // through docs_read either, so indexing them would create inconsistent behavior.
+type maintenanceStats struct {
+	scanned    int
+	normalized int
+	failed     int
+}
+
 func (s *Service) Rebuild(ctx context.Context) error {
+	_, err := s.rebuild(ctx)
+	return err
+}
+
+func (s *Service) rebuild(ctx context.Context) (maintenanceStats, error) {
+	var stats maintenanceStats
 	var walk func(string) error
 	walk = func(full string) error {
 		objs, err := fs.List(ctx, full, &fs.ListArgs{NoLog: true})
@@ -762,15 +783,20 @@ func (s *Service) Rebuild(ctx context.Context) error {
 			if _, err := s.fullPath(rel); err != nil || obj.GetSize() > s.config.MaxReadBytes {
 				continue
 			}
-			read, err := s.Read(ctx, rel, 0, obj.GetSize())
+			stats.scanned++
+			read, err := s.loadCanonical(ctx, rel, child)
 			if err != nil {
+				stats.failed++
 				continue
 			}
-			if err := s.index.UpsertAt(rel, read.Content, read.Revision, obj.ModTime()); err != nil {
+			if read.normalized {
+				stats.normalized++
+			}
+			if err := s.index.UpsertAt(rel, string(read.content), revision(read.content), obj.ModTime()); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	return walk(s.config.DocsRoot)
+	return stats, walk(s.config.DocsRoot)
 }

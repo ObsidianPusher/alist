@@ -127,6 +127,25 @@ func TestReadPaginatesCanonicalizedGB18030Document(t *testing.T) {
 	require.Equal(t, "渣外", next.Content)
 }
 
+func TestHistoryReturnsCanonicalizedNormalizationSnapshot(t *testing.T) {
+	svc := setupListService(t)
+	raw, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte("钢渣外卖"))
+	require.NoError(t, err)
+	err = fs.PutDirectly(context.Background(), svc.config.DocsRoot, &stream.FileStream{
+		Obj:      &model.Object{Name: "legacy-history.md", Size: int64(len(raw))},
+		Reader:   bytes.NewReader(raw),
+		Mimetype: "text/markdown",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.Read(context.Background(), "legacy-history.md", 0, 0)
+	require.NoError(t, err)
+	history, err := svc.History("legacy-history.md", revision(raw), true)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	require.Equal(t, "钢渣外卖", history[0].Content)
+}
+
 func TestReplaceRejectsAmbiguousText(t *testing.T) {
 	svc := setupListService(t)
 	before, err := svc.Read(context.Background(), "README.md", 0, 0)
