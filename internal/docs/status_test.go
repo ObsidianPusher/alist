@@ -76,3 +76,12 @@ func TestContextCapsReturnedCharacters(t *testing.T) {
 	require.NoError(t, err)
 	require.LessOrEqual(t, len([]rune(context.Content)), 10)
 }
+
+func TestQueryAcceptsAnyMatchMode(t *testing.T) {
+	svc := setupListService(t)
+	require.NoError(t, svc.Rebuild(context.Background()))
+	result, err := svc.Query("intro", "", "any", 3, 100)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Results)
+	require.Contains(t, result.RecommendedNext, "docs_read")
+}

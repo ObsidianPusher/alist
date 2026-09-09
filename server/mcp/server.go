@@ -25,6 +25,13 @@ type searchInput struct {
 	Limit      int    `json:"limit,omitempty"`
 	MatchMode  string `json:"match_mode,omitempty"`
 }
+type queryInput struct {
+	Query       string `json:"query"`
+	PathPrefix  string `json:"path_prefix,omitempty"`
+	MatchMode   string `json:"match_mode,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+	BudgetChars int    `json:"budget_chars,omitempty"`
+}
 type listInput struct {
 	PathPrefix string `json:"path_prefix,omitempty"`
 	Cursor     string `json:"cursor,omitempty"`
@@ -35,6 +42,30 @@ type readInput struct {
 	Offset          int64  `json:"offset,omitempty"`
 	Limit           int64  `json:"limit,omitempty"`
 	IncludeRevision *bool  `json:"include_revision,omitempty"`
+	SectionID       string `json:"section_id,omitempty"`
+	Adjacent        int    `json:"adjacent,omitempty"`
+	Outline         bool   `json:"outline,omitempty"`
+}
+type documentOutput struct {
+	Path       string                `json:"path"`
+	Revision   string                `json:"revision"`
+	Content    string                `json:"content,omitempty"`
+	Truncated  bool                  `json:"truncated,omitempty"`
+	NextOffset int64                 `json:"next_offset,omitempty"`
+	Sections   []docs.OutlineSection `json:"sections,omitempty"`
+	Chunks     []docs.Chunk          `json:"chunks,omitempty"`
+}
+type editInput struct {
+	Kind             string `json:"kind"`
+	Path             string `json:"path"`
+	To               string `json:"to,omitempty"`
+	ExpectedRevision string `json:"expected_revision"`
+	Content          string `json:"content,omitempty"`
+	OldText          string `json:"old_text,omitempty"`
+	NewText          string `json:"new_text,omitempty"`
+	SectionID        string `json:"section_id,omitempty"`
+	Anchor           string `json:"anchor,omitempty"`
+	Patch            string `json:"patch,omitempty"`
 }
 type readSectionInput struct {
 	Path      string `json:"path"`
@@ -231,16 +262,8 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	}
 	_, _ = svc.RebuildAsync(context.Background())
 	server := protocol.NewServer(&protocol.Implementation{Name: "alist-docs", Version: "1.0.0"}, nil)
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_search", Description: "Search document text by keywords"}, func(ctx context.Context, _ *protocol.CallToolRequest, in searchInput) (*protocol.CallToolResult, searchOutput, error) {
-		mode := in.MatchMode
-		if mode == "" {
-			mode = "smart"
-		}
-		r, e := svc.SearchMode(in.Query, in.PathPrefix, mode, in.Limit)
-		return success(), searchOutput{Results: r}, e
-	})
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_context", Description: "Return search context within a fixed character budget"}, func(ctx context.Context, _ *protocol.CallToolRequest, in contextInput) (*protocol.CallToolResult, docs.ContextResult, error) {
-		r, e := svc.Context(in.Query, in.PathPrefix, in.BudgetChars)
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_query", Description: "Recommended daily entry point: search plus compact context. match_mode is any (default; smart is accepted as a legacy alias), exact, or path. Use docs_read only when the returned context is insufficient."}, func(ctx context.Context, _ *protocol.CallToolRequest, in queryInput) (*protocol.CallToolResult, docs.QueryResult, error) {
+		r, e := svc.Query(in.Query, in.PathPrefix, in.MatchMode, in.Limit, in.BudgetChars)
 		return success(), r, e
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_diff", Description: "Compare a historical snapshot with the current document"}, func(ctx context.Context, _ *protocol.CallToolRequest, in diffInput) (*protocol.CallToolResult, docs.DiffResult, error) {
@@ -251,11 +274,19 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 		r, e := svc.BatchEdit(ctx, in.Edits)
 		return success(), r, e
 	})
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List documents under the configured root"}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List Markdown documents. path_prefix is optional; limit is 1-100 and cursor is returned as next_cursor."}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
 		r, e := svc.List(ctx, in.PathPrefix, in.Cursor, in.Limit)
 		return success(), listOutput(r), e
 	})
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read a document and its revision"}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, docs.ReadResult, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read one document. Set section_id for a matching query section, outline=true for headings, or offset/limit for a UTF-8-safe page. adjacent is 0-5 and applies to section_id."}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, documentOutput, error) {
+		if in.Outline {
+			r, e := svc.Outline(ctx, in.Path)
+			return success(), documentOutput{Path: r.Path, Revision: r.Revision, Sections: r.Sections}, e
+		}
+		if in.SectionID != "" {
+			r, e := svc.ReadSection(ctx, in.Path, in.SectionID, in.Adjacent)
+			return success(), documentOutput{Path: r.Path, Revision: r.Revision, Chunks: r.Chunks}, e
+		}
 		includeRevision := true
 		if in.Limit == 0 {
 			in.Limit = 4096
@@ -264,11 +295,34 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 			includeRevision = *in.IncludeRevision
 		}
 		r, e := svc.ReadWithRevision(ctx, in.Path, in.Offset, in.Limit, includeRevision)
-		return success(), r, e
+		return success(), documentOutput{Path: in.Path, Revision: r.Revision, Content: r.Content, Truncated: r.Truncated, NextOffset: r.NextOffset}, e
 	})
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_outline", Description: "Read compact Markdown section outline"}, func(ctx context.Context, _ *protocol.CallToolRequest, in outlineInput) (*protocol.CallToolResult, docs.OutlineResult, error) {
-		r, e := svc.Outline(ctx, in.Path)
-		return success(), r, e
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_edit", Description: "Edit one document with revision protection. kind is update, replace, append, insert_after, section_update, patch, delete, or move. Required fields depend on kind; errors name the missing or invalid field."}, func(ctx context.Context, _ *protocol.CallToolRequest, in editInput) (*protocol.CallToolResult, map[string]string, error) {
+		var revision string
+		var err error
+		switch in.Kind {
+		case "update":
+			revision, err = svc.Update(ctx, in.Path, in.Content, &in.ExpectedRevision)
+		case "replace":
+			revision, err = svc.Replace(ctx, in.Path, in.OldText, in.NewText, in.ExpectedRevision)
+		case "append":
+			revision, err = svc.Append(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
+		case "insert_after":
+			revision, err = svc.InsertAfter(ctx, in.Path, in.Anchor, in.Content, in.ExpectedRevision)
+		case "section_update":
+			revision, err = svc.UpdateSection(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
+		case "patch":
+			revision, err = svc.Patch(ctx, in.Path, in.Patch, in.ExpectedRevision)
+		case "delete":
+			err = svc.Delete(ctx, in.Path, in.ExpectedRevision)
+			revision = "deleted"
+		case "move":
+			err = svc.Move(ctx, in.Path, in.To, in.ExpectedRevision)
+			revision = "moved"
+		default:
+			err = fmt.Errorf("invalid edit kind %q: expected update, replace, append, insert_after, section_update, patch, delete, or move", in.Kind)
+		}
+		return success(), map[string]string{"revision": revision}, err
 	})
 	protocol.AddTool(server, &protocol.Tool{Name: "docs_append", Description: "Append text to a Markdown section"}, func(ctx context.Context, _ *protocol.CallToolRequest, in appendInput) (*protocol.CallToolResult, map[string]string, error) {
 		r, e := svc.Append(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)

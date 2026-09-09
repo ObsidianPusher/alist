@@ -83,6 +83,11 @@ type ContextResult struct {
 	Content string         `json:"content"`
 	Results []SearchResult `json:"results"`
 }
+type QueryResult struct {
+	Results         []SearchResult `json:"results"`
+	Context         string         `json:"context,omitempty"`
+	RecommendedNext string         `json:"recommended_next"`
+}
 type DiffResult struct {
 	FromRevision string `json:"from_revision"`
 	Revision     string `json:"revision"`
@@ -590,10 +595,36 @@ func (s *Service) Search(query, prefix string, limit int) ([]SearchResult, error
 	return s.SearchMode(query, prefix, "smart", limit)
 }
 func (s *Service) SearchMode(query, prefix, mode string, limit int) ([]SearchResult, error) {
+	if mode == "any" {
+		mode = "smart"
+	}
 	if mode != "smart" && mode != "exact" && mode != "path" {
-		return nil, fmt.Errorf("invalid match mode")
+		return nil, fmt.Errorf("invalid match_mode %q: expected one of any, exact, path", mode)
 	}
 	return s.index.Search(query, prefix, mode, limit)
+}
+func (s *Service) Query(query, prefix, mode string, limit, budget int) (QueryResult, error) {
+	if budget <= 0 || budget > 4000 {
+		budget = 1600
+	}
+	results, err := s.SearchMode(query, prefix, mode, limit)
+	if err != nil {
+		return QueryResult{}, err
+	}
+	parts, used := make([]string, 0, len(results)), 0
+	for _, result := range results {
+		part := result.Path + "#" + result.SectionID + "\n" + result.Snippet
+		r := []rune(part)
+		if used+len(r) > budget {
+			r = r[:budget-used]
+		}
+		if len(r) == 0 {
+			break
+		}
+		parts, used = append(parts, string(r)), used+len(r)
+	}
+	next := "Results include compact context. Use docs_read with path and section_id only when more detail is needed."
+	return QueryResult{Results: results, Context: strings.Join(parts, "\n\n"), RecommendedNext: next}, nil
 }
 func (s *Service) Context(query, prefix string, budget int) (ContextResult, error) {
 	if budget <= 0 {
