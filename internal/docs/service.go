@@ -109,6 +109,11 @@ type Service struct {
 	status   IndexStatus
 }
 
+type canonicalDocument struct {
+	content []byte
+	size    int64
+}
+
 func New(config conf.MCPConfig) (*Service, error) {
 	if config.DocsRoot == "" {
 		return nil, fmt.Errorf("mcp docs_root is required")
@@ -195,39 +200,71 @@ func (s *Service) ReadWithRevision(ctx context.Context, p string, offset, limit 
 	if err != nil {
 		return ReadResult{}, err
 	}
-	b, size, truncated, err := s.readBytes(ctx, full, offset, limit)
+	doc, err := s.loadCanonical(ctx, p, full)
 	if err != nil {
 		return ReadResult{}, err
 	}
-	if truncated {
-		b = trimIncompleteUTF8Suffix(b)
-	}
-	normalized, changed, err := normalizeMarkdownEncoding(b)
+	page, next, truncated, err := paginateUTF8(doc.content, offset, limit, s.config.MaxReadBytes)
 	if err != nil {
 		return ReadResult{}, err
 	}
-	b = normalized
-	if changed && offset == 0 && !truncated {
-		// Read-triggered maintenance keeps the document library canonical.
-		file := &stream.FileStream{Obj: &model.Object{Name: path.Base(full), Size: int64(len(b))}, Reader: bytes.NewReader(b), Mimetype: "text/markdown"}
-		if err := fs.PutDirectly(ctx, path.Dir(full), file); err != nil {
-			return ReadResult{}, err
-		}
-		s.index.Upsert(p, string(b), revision(b))
-		size = int64(len(b))
-	}
-	result := ReadResult{Content: string(b), Size: size, Truncated: truncated}
+	result := ReadResult{Content: string(page), Size: doc.size, Truncated: truncated}
 	if truncated {
-		result.NextOffset = offset + int64(len(b))
+		result.NextOffset = next
 	}
 	if includeRevision {
-		all, _, _, err := s.readBytes(ctx, full, 0, size)
-		if err != nil {
-			return ReadResult{}, err
-		}
-		result.Revision = revision(all)
+		result.Revision = revision(doc.content)
 	}
 	return result, nil
+}
+
+func (s *Service) loadCanonical(ctx context.Context, p, full string) (canonicalDocument, error) {
+	raw, _, truncated, err := s.readBytes(ctx, full, 0, 0)
+	if err != nil {
+		return canonicalDocument{}, err
+	}
+	if truncated {
+		return canonicalDocument{}, fmt.Errorf("document exceeds maximum readable size")
+	}
+	content, changed, err := normalizeMarkdownEncoding(raw)
+	if err != nil {
+		return canonicalDocument{}, err
+	}
+	if changed {
+		file := &stream.FileStream{Obj: &model.Object{Name: path.Base(full), Size: int64(len(content))}, Reader: bytes.NewReader(content), Mimetype: "text/markdown"}
+		if err := fs.PutDirectly(ctx, path.Dir(full), file); err != nil {
+			return canonicalDocument{}, err
+		}
+		s.record(p, revision(raw), "normalize", raw)
+		if err := s.index.Upsert(p, string(content), revision(content)); err != nil {
+			return canonicalDocument{}, err
+		}
+	}
+	return canonicalDocument{content: content, size: int64(len(content))}, nil
+}
+
+func paginateUTF8(content []byte, offset, limit, max int64) ([]byte, int64, bool, error) {
+	if offset < 0 || limit < 0 || offset > int64(len(content)) {
+		return nil, 0, false, fmt.Errorf("invalid document offset or limit")
+	}
+	if offset < int64(len(content)) && !utf8.RuneStart(content[offset]) {
+		return nil, 0, false, fmt.Errorf("document offset must be at a UTF-8 character boundary")
+	}
+	if limit == 0 || limit > max {
+		limit = max
+	}
+	end := offset + limit
+	if end >= int64(len(content)) {
+		return content[offset:], int64(len(content)), false, nil
+	}
+	for end > offset && !utf8.RuneStart(content[end]) {
+		end--
+	}
+	if end == offset {
+		_, size := utf8.DecodeRune(content[offset:])
+		end += int64(size)
+	}
+	return content[offset:end], end, true, nil
 }
 
 func (s *Service) Update(ctx context.Context, p, content string, expected *string) (string, error) {
@@ -238,6 +275,11 @@ func (s *Service) Update(ctx context.Context, p, content string, expected *strin
 	if int64(len(content)) > s.config.MaxWriteBytes || !utf8.ValidString(content) {
 		return "", fmt.Errorf("invalid document content")
 	}
+	canonical, _, err := normalizeMarkdownEncoding([]byte(content))
+	if err != nil {
+		return "", err
+	}
+	content = string(canonical)
 	var before []byte
 	old, err := s.Read(ctx, p, 0, 0)
 	if err == nil {

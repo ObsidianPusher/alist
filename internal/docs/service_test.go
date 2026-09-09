@@ -1,6 +1,7 @@
 package docs
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -9,9 +10,12 @@ import (
 	_ "github.com/alist-org/alist/v3/drivers/local"
 	"github.com/alist-org/alist/v3/internal/conf"
 	"github.com/alist-org/alist/v3/internal/db"
+	"github.com/alist-org/alist/v3/internal/fs"
 	"github.com/alist-org/alist/v3/internal/model"
 	"github.com/alist-org/alist/v3/internal/op"
+	"github.com/alist-org/alist/v3/internal/stream"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -99,6 +103,28 @@ func TestReadTruncatesUTF8AtCharacterBoundary(t *testing.T) {
 	next, err := svc.Read(context.Background(), "README.md", page.NextOffset, 3)
 	require.NoError(t, err)
 	require.Equal(t, "益", next.Content)
+}
+
+func TestReadPaginatesCanonicalizedGB18030Document(t *testing.T) {
+	svc := setupListService(t)
+	raw, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte("钢渣外卖"))
+	require.NoError(t, err)
+	err = fs.PutDirectly(context.Background(), svc.config.DocsRoot, &stream.FileStream{
+		Obj:      &model.Object{Name: "legacy.md", Size: int64(len(raw))},
+		Reader:   bytes.NewReader(raw),
+		Mimetype: "text/markdown",
+	})
+	require.NoError(t, err)
+
+	page, err := svc.Read(context.Background(), "legacy.md", 0, 3)
+	require.NoError(t, err)
+	require.Equal(t, "钢", page.Content)
+	require.True(t, page.Truncated)
+	require.EqualValues(t, len([]byte("钢")), page.NextOffset)
+
+	next, err := svc.Read(context.Background(), "legacy.md", page.NextOffset, 6)
+	require.NoError(t, err)
+	require.Equal(t, "渣外", next.Content)
 }
 
 func TestReplaceRejectsAmbiguousText(t *testing.T) {
