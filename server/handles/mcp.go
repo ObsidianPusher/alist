@@ -28,11 +28,15 @@ type mcpConfigRequest struct {
 }
 
 func GetMCPConfig(c *gin.Context) {
-	common.SuccessResp(c, gin.H{
+	result := gin.H{
 		"enabled": setting.GetBool(conf.MCPEnabled), "docs_root": setting.GetStr(conf.MCPDocsRoot),
 		"max_read_bytes": setting.GetStr(conf.MCPMaxReadBytes), "max_write_bytes": setting.GetStr(conf.MCPMaxWriteBytes),
 		"history_limit": setting.GetStr(conf.MCPHistoryLimit), "token_configured": setting.GetStr(conf.MCPTokenHash) != "",
-	})
+	}
+	if status, ok := mcp.Status(); ok {
+		result["index_status"] = status
+	}
+	common.SuccessResp(c, result)
 }
 
 func SaveMCPConfig(c *gin.Context) {

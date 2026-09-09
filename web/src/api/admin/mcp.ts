@@ -8,6 +8,15 @@ export type MCPConfig = {
   max_write_bytes: string
   history_limit: string
   token_configured: boolean
+  index_status?: {
+    running: boolean
+    documents: number
+    chunks: number
+    scanned: number
+    normalized: number
+    failed: number
+    last_success?: string
+  }
 }
 
 export type MCPConfigInput = {

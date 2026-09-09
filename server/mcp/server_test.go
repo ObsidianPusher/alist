@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/alist-org/alist/v3/internal/conf"
+	"github.com/alist-org/alist/v3/internal/docs"
 )
 
 func TestMCPRejectsMissingBearerToken(t *testing.T) {
@@ -29,5 +30,14 @@ func TestRuntimeCloseStopsMaintenance(t *testing.T) {
 	case <-stop:
 	default:
 		t.Fatal("maintenance loop was not stopped")
+	}
+}
+
+func TestStatusReturnsActiveDocumentStatus(t *testing.T) {
+	previous := active.Swap(&runtimeState{svc: &docs.Service{}})
+	t.Cleanup(func() { active.Store(previous) })
+	_, ok := Status()
+	if !ok {
+		t.Fatal("expected active MCP status")
 	}
 }

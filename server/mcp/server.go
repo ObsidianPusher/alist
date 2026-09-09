@@ -175,6 +175,14 @@ func (s *runtimeState) startMaintenance() {
 
 var active atomic.Pointer[runtimeState]
 
+func Status() (docs.IndexStatus, bool) {
+	state := active.Load()
+	if state == nil || state.svc == nil {
+		return docs.IndexStatus{}, false
+	}
+	return state.svc.Status(), true
+}
+
 func Register(g *gin.RouterGroup) error {
 	if err := Reload(); err != nil {
 		return err
