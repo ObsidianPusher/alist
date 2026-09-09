@@ -595,11 +595,14 @@ func (s *Service) Search(query, prefix string, limit int) ([]SearchResult, error
 	return s.SearchMode(query, prefix, "smart", limit)
 }
 func (s *Service) SearchMode(query, prefix, mode string, limit int) ([]SearchResult, error) {
-	if mode == "any" {
-		mode = "smart"
+	if mode == "" {
+		mode = "all"
 	}
-	if mode != "smart" && mode != "exact" && mode != "path" {
-		return nil, fmt.Errorf("invalid match_mode %q: expected one of any, exact, path", mode)
+	if mode == "smart" {
+		mode = "any"
+	}
+	if mode != "all" && mode != "any" && mode != "exact" && mode != "path" {
+		return nil, fmt.Errorf("invalid match_mode %q: expected one of all, any, exact, path", mode)
 	}
 	return s.index.Search(query, prefix, mode, limit)
 }

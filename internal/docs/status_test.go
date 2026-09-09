@@ -85,3 +85,16 @@ func TestQueryAcceptsAnyMatchMode(t *testing.T) {
 	require.NotEmpty(t, result.Results)
 	require.Contains(t, result.RecommendedNext, "docs_read")
 }
+
+func TestQueryDefaultsToAllTermsForRelevantResults(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "mcpdoc 工具 使用 设计", &before.Revision)
+	require.NoError(t, err)
+	require.NoError(t, svc.Rebuild(context.Background()))
+	result, err := svc.Query("mcpdoc 工具 使用 设计", "", "", 10, 100)
+	require.NoError(t, err)
+	require.Len(t, result.Results, 1)
+	require.Equal(t, "README.md", result.Results[0].Path)
+}

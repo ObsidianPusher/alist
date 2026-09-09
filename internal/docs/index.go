@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/blevesearch/bleve/v2"
-	"github.com/blevesearch/bleve/v2/search/query"
+	querypkg "github.com/blevesearch/bleve/v2/search/query"
 )
 
 type SearchResult struct {
@@ -116,15 +116,20 @@ func (i *Index) Search(q, prefix, mode string, limit int) ([]SearchResult, error
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	var query query.Query
+	var query querypkg.Query
 	switch mode {
+	case "all":
+		match := bleve.NewMatchQuery(q)
+		match.SetField("content")
+		match.SetOperator(querypkg.MatchQueryOperatorAnd)
+		query = match
 	case "exact":
 		query = bleve.NewPhraseQuery(strings.Fields(q), "content")
 	case "path":
 		match := bleve.NewMatchQuery(q)
 		match.SetField("path")
 		query = match
-	default:
+	default: // any
 		match := bleve.NewMatchQuery(q)
 		match.SetField("content")
 		query = match

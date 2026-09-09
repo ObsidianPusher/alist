@@ -1,5 +1,7 @@
 # Markdown Knowledge MCP Design
 
+> Historical design. Use `docs/mcp-docs.md` for the current tool contract.
+
 ## Scope
 
 The MCP document library stores, reads, indexes and updates Markdown (`.md`)

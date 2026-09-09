@@ -56,17 +56,25 @@ type documentOutput struct {
 	Chunks     []docs.Chunk          `json:"chunks,omitempty"`
 }
 type editInput struct {
-	Kind             string `json:"kind"`
-	Path             string `json:"path"`
-	To               string `json:"to,omitempty"`
-	ExpectedRevision string `json:"expected_revision"`
-	Content          string `json:"content,omitempty"`
-	OldText          string `json:"old_text,omitempty"`
-	NewText          string `json:"new_text,omitempty"`
-	SectionID        string `json:"section_id,omitempty"`
-	Anchor           string `json:"anchor,omitempty"`
-	Patch            string `json:"patch,omitempty"`
+	Kind             string  `json:"kind"`
+	Path             string  `json:"path"`
+	To               string  `json:"to,omitempty"`
+	ExpectedRevision *string `json:"expected_revision,omitempty"`
+	Content          string  `json:"content,omitempty"`
+	OldText          string  `json:"old_text,omitempty"`
+	NewText          string  `json:"new_text,omitempty"`
+	SectionID        string  `json:"section_id,omitempty"`
+	Anchor           string  `json:"anchor,omitempty"`
+	Patch            string  `json:"patch,omitempty"`
 }
+
+func requiredRevision(value *string) (string, error) {
+	if value == nil || *value == "" {
+		return "", fmt.Errorf("expected_revision is required for editing an existing document; use kind=create for a new document")
+	}
+	return *value, nil
+}
+
 type readSectionInput struct {
 	Path      string `json:"path"`
 	SectionID string `json:"section_id"`
@@ -301,30 +309,65 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 		r, e := svc.ReadWithRevision(ctx, in.Path, in.Offset, in.Limit, includeRevision)
 		return success(), documentOutput{Path: in.Path, Revision: r.Revision, Content: r.Content, Truncated: r.Truncated, NextOffset: r.NextOffset}, e
 	})
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_edit", Description: "Edit one document with revision protection. kind is update, replace, append, insert_after, section_update, patch, delete, or move. Required fields depend on kind; errors name the missing or invalid field."}, func(ctx context.Context, _ *protocol.CallToolRequest, in editInput) (*protocol.CallToolResult, map[string]string, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_edit", Description: "Edit one document with revision protection. kind=create creates a new path without a revision; kind=update, replace, append, insert_after, section_update, patch, delete, and move require expected_revision."}, func(ctx context.Context, _ *protocol.CallToolRequest, in editInput) (*protocol.CallToolResult, map[string]string, error) {
 		var revision string
 		var err error
+		expected, expectedErr := requiredRevision(in.ExpectedRevision)
 		switch in.Kind {
+		case "create":
+			revision, err = svc.Update(ctx, in.Path, in.Content, nil)
 		case "update":
-			revision, err = svc.Update(ctx, in.Path, in.Content, &in.ExpectedRevision)
+			if expectedErr != nil {
+				err = expectedErr
+			} else {
+				revision, err = svc.Update(ctx, in.Path, in.Content, in.ExpectedRevision)
+			}
 		case "replace":
-			revision, err = svc.Replace(ctx, in.Path, in.OldText, in.NewText, in.ExpectedRevision)
+			if expectedErr != nil {
+				err = expectedErr
+			} else {
+				revision, err = svc.Replace(ctx, in.Path, in.OldText, in.NewText, expected)
+			}
 		case "append":
-			revision, err = svc.Append(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
+			if expectedErr != nil {
+				err = expectedErr
+			} else {
+				revision, err = svc.Append(ctx, in.Path, in.SectionID, in.Content, expected)
+			}
 		case "insert_after":
-			revision, err = svc.InsertAfter(ctx, in.Path, in.Anchor, in.Content, in.ExpectedRevision)
+			if expectedErr != nil {
+				err = expectedErr
+			} else {
+				revision, err = svc.InsertAfter(ctx, in.Path, in.Anchor, in.Content, expected)
+			}
 		case "section_update":
-			revision, err = svc.UpdateSection(ctx, in.Path, in.SectionID, in.Content, in.ExpectedRevision)
+			if expectedErr != nil {
+				err = expectedErr
+			} else {
+				revision, err = svc.UpdateSection(ctx, in.Path, in.SectionID, in.Content, expected)
+			}
 		case "patch":
-			revision, err = svc.Patch(ctx, in.Path, in.Patch, in.ExpectedRevision)
+			if expectedErr != nil {
+				err = expectedErr
+			} else {
+				revision, err = svc.Patch(ctx, in.Path, in.Patch, expected)
+			}
 		case "delete":
-			err = svc.Delete(ctx, in.Path, in.ExpectedRevision)
+			if expectedErr != nil {
+				err = expectedErr
+			} else {
+				err = svc.Delete(ctx, in.Path, expected)
+			}
 			revision = "deleted"
 		case "move":
-			err = svc.Move(ctx, in.Path, in.To, in.ExpectedRevision)
+			if expectedErr != nil {
+				err = expectedErr
+			} else {
+				err = svc.Move(ctx, in.Path, in.To, expected)
+			}
 			revision = "moved"
 		default:
-			err = fmt.Errorf("invalid edit kind %q: expected update, replace, append, insert_after, section_update, patch, delete, or move", in.Kind)
+			err = fmt.Errorf("invalid edit kind %q: expected create, update, replace, append, insert_after, section_update, patch, delete, or move", in.Kind)
 		}
 		return success(), map[string]string{"revision": revision}, err
 	})

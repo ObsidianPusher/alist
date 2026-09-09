@@ -1,5 +1,7 @@
 # MCP Response Efficiency Design
 
+> Historical design. Use `docs/mcp-docs.md` for the current tool contract.
+
 ## Goal
 
 Reduce agent token consumption while preserving reliable Markdown knowledge

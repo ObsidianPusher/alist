@@ -1,5 +1,7 @@
 # AList 文档 MCP 设计
 
+> 历史设计，已由 `docs/mcp-docs.md` 取代；不要使用其中的旧工具名。
+
 ## 目标
 
 在 AList 进程内提供受 HTTPS 保护的 MCP Streamable HTTP 服务，使 Agent 只能在配置的文档根目录内查询、全文搜索和直接维护 Markdown/文本文件。
