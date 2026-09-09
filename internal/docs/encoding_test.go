@@ -48,3 +48,8 @@ func TestNormalizeMarkdownEncodingConvertsUTF16WithBOM(t *testing.T) {
 		require.Equal(t, "钢渣外卖", string(text))
 	}
 }
+
+func TestNormalizeMarkdownEncodingRejectsUndecodableBytes(t *testing.T) {
+	_, _, err := normalizeMarkdownEncoding([]byte{0xff})
+	require.Error(t, err)
+}

@@ -31,7 +31,7 @@ func normalizeMarkdownEncoding(raw []byte) ([]byte, bool, error) {
 		decoder = simplifiedchinese.GB18030.NewDecoder()
 	}
 	decoded, err := decoder.Bytes(raw)
-	if err != nil || !utf8.Valid(decoded) {
+	if err != nil || !utf8.Valid(decoded) || bytes.Contains(decoded, []byte(string(utf8.RuneError))) {
 		return nil, false, fmt.Errorf("unsupported document encoding")
 	}
 	return decoded, true, nil
