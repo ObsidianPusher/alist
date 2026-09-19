@@ -289,8 +289,10 @@ func (s *Service) Update(ctx context.Context, p, content string, expected *strin
 	}
 	content = string(canonical)
 	var before []byte
+	exists := false
 	old, err := s.Read(ctx, p, 0, 0)
 	if err == nil {
+		exists = true
 		before = []byte(old.Content)
 		if expected == nil || *expected != old.Revision {
 			return "", &ConflictError{ActualRevision: old.Revision}
@@ -305,7 +307,11 @@ func (s *Service) Update(ctx context.Context, p, content string, expected *strin
 		return "", err
 	}
 	next := revision([]byte(content))
-	s.record(p, next, "update", before)
+	if exists {
+		// History snapshots are addressed by the revision of the captured content,
+		// not the revision written by this update.
+		s.record(p, old.Revision, "update", before)
+	}
 	if err := s.index.Upsert(p, content, next); err != nil {
 		return next, err
 	}
@@ -509,7 +515,7 @@ func (s *Service) History(p, rev string, includeContent bool) ([]HistoryResult, 
 			continue
 		}
 		r := HistoryResult{Revision: it.Revision, Action: it.Action}
-		if includeContent && rev != "" {
+		if includeContent {
 			z, e := gzip.NewReader(bytes.NewReader(it.Snapshot))
 			if e != nil {
 				return nil, e
@@ -614,6 +620,17 @@ func (s *Service) Query(query, prefix, mode string, limit, budget int) (QueryRes
 	if err != nil {
 		return QueryResult{}, err
 	}
+	// The index is maintained separately from storage. Revalidate hits so an
+	// asynchronous/stale index can never surface deleted or superseded content.
+	live := results[:0]
+	for _, result := range results {
+		current, readErr := s.Read(context.Background(), result.Path, 0, 0)
+		if readErr != nil || current.Revision != result.Revision {
+			continue
+		}
+		live = append(live, result)
+	}
+	results = live
 	parts, used := make([]string, 0, len(results)), 0
 	for _, result := range results {
 		part := result.Path + "#" + result.SectionID + "\n" + result.Snippet

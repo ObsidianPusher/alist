@@ -146,6 +146,49 @@ func TestHistoryReturnsCanonicalizedNormalizationSnapshot(t *testing.T) {
 	require.Equal(t, "钢渣外卖", history[0].Content)
 }
 
+func TestHistoryIncludesSnapshotsWhenListing(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "updated", &before.Revision)
+	require.NoError(t, err)
+	history, err := svc.History("README.md", "", true)
+	require.NoError(t, err)
+	require.NotEmpty(t, history)
+	require.Equal(t, before.Revision, history[0].Revision)
+	require.Equal(t, "root", history[0].Content)
+}
+
+func TestQueryFiltersDeletedIndexEntries(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "unique deletion needle", &before.Revision)
+	require.NoError(t, err)
+	require.NoError(t, svc.Rebuild(context.Background()))
+	full, err := svc.fullPath("README.md")
+	require.NoError(t, err)
+	require.NoError(t, fs.Remove(context.Background(), full))
+	result, err := svc.Query("unique deletion needle", "", "any", 10, 100)
+	require.NoError(t, err)
+	require.Empty(t, result.Results)
+}
+
+func TestSearchExactAndPathModes(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "生产对账规则", &before.Revision)
+	require.NoError(t, err)
+	require.NoError(t, svc.Rebuild(context.Background()))
+	exact, err := svc.SearchMode("生产对账", "", "exact", 10)
+	require.NoError(t, err)
+	require.Len(t, exact, 1)
+	pathResults, err := svc.SearchMode("README.md", "", "path", 10)
+	require.NoError(t, err)
+	require.Len(t, pathResults, 1)
+}
+
 func TestReplaceRejectsAmbiguousText(t *testing.T) {
 	svc := setupListService(t)
 	before, err := svc.Read(context.Background(), "README.md", 0, 0)

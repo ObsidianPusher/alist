@@ -28,15 +28,16 @@ type Index struct {
 	index bleve.Index
 }
 type indexedDoc struct {
-	Path      string    `json:"path"`
-	SectionID string    `json:"section_id"`
-	Heading   string    `json:"heading"`
-	Ordinal   int       `json:"ordinal"`
-	Start     int       `json:"start"`
-	End       int       `json:"end"`
-	Content   string    `json:"content"`
-	Revision  string    `json:"revision"`
-	Modified  time.Time `json:"modified"`
+	Path       string    `json:"path"`
+	PathSearch string    `json:"path_search"`
+	SectionID  string    `json:"section_id"`
+	Heading    string    `json:"heading"`
+	Ordinal    int       `json:"ordinal"`
+	Start      int       `json:"start"`
+	End        int       `json:"end"`
+	Content    string    `json:"content"`
+	Revision   string    `json:"revision"`
+	Modified   time.Time `json:"modified"`
 }
 
 func OpenIndex(dir string) (*Index, error) {
@@ -56,6 +57,7 @@ func OpenIndex(dir string) (*Index, error) {
 		m := bleve.NewIndexMapping()
 		d := bleve.NewDocumentMapping()
 		d.AddFieldMappingsAt("path", bleve.NewKeywordFieldMapping())
+		d.AddFieldMappingsAt("path_search", bleve.NewTextFieldMapping())
 		d.AddFieldMappingsAt("section_id", bleve.NewKeywordFieldMapping())
 		d.AddFieldMappingsAt("content", bleve.NewTextFieldMapping())
 		m.AddDocumentMapping("doc", d)
@@ -78,7 +80,9 @@ func (i *Index) Replace(p, revision string, modified time.Time, chunks []Chunk) 
 	defer i.mu.Unlock()
 	q := bleve.NewTermQuery(p)
 	q.SetField("path")
-	res, err := i.index.Search(bleve.NewSearchRequest(q))
+	req := bleve.NewSearchRequest(q)
+	req.Size = 10000
+	res, err := i.index.Search(req)
 	if err != nil {
 		return err
 	}
@@ -88,7 +92,7 @@ func (i *Index) Replace(p, revision string, modified time.Time, chunks []Chunk) 
 	}
 	for _, chunk := range chunks {
 		id := p + "#" + chunk.ID
-		batch.Index(id, indexedDoc{Path: p, SectionID: chunk.ID, Heading: chunk.Heading, Ordinal: chunk.Ordinal, Start: chunk.Start, End: chunk.End, Content: chunk.Content, Revision: revision, Modified: modified})
+		batch.Index(id, indexedDoc{Path: p, PathSearch: p, SectionID: chunk.ID, Heading: chunk.Heading, Ordinal: chunk.Ordinal, Start: chunk.Start, End: chunk.End, Content: chunk.Content, Revision: revision, Modified: modified})
 	}
 	return i.index.Batch(batch)
 }
@@ -97,7 +101,9 @@ func (i *Index) Delete(p string) error {
 	defer i.mu.Unlock()
 	q := bleve.NewTermQuery(p)
 	q.SetField("path")
-	res, err := i.index.Search(bleve.NewSearchRequest(q))
+	req := bleve.NewSearchRequest(q)
+	req.Size = 10000
+	res, err := i.index.Search(req)
 	if err != nil {
 		return err
 	}
@@ -124,10 +130,10 @@ func (i *Index) Search(q, prefix, mode string, limit int) ([]SearchResult, error
 		match.SetOperator(querypkg.MatchQueryOperatorAnd)
 		query = match
 	case "exact":
-		query = bleve.NewPhraseQuery(strings.Fields(q), "content")
+		query = bleve.NewMatchPhraseQuery(q)
 	case "path":
-		match := bleve.NewMatchQuery(q)
-		match.SetField("path")
+		match := bleve.NewMatchPhraseQuery(strings.Trim(strings.TrimSpace(q), "/"))
+		match.SetField("path_search")
 		query = match
 	default: // any
 		match := bleve.NewMatchQuery(q)

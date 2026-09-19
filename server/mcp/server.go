@@ -26,11 +26,12 @@ type searchInput struct {
 	MatchMode  string `json:"match_mode,omitempty"`
 }
 type queryInput struct {
-	Query       string `json:"query"`
-	PathPrefix  string `json:"path_prefix,omitempty"`
-	MatchMode   string `json:"match_mode,omitempty"`
-	Limit       int    `json:"limit,omitempty"`
-	BudgetChars int    `json:"budget_chars,omitempty"`
+	Query          string `json:"query"`
+	PathPrefix     string `json:"path_prefix,omitempty"`
+	MatchMode      string `json:"match_mode,omitempty"`
+	Limit          int    `json:"limit,omitempty"`
+	BudgetChars    int    `json:"budget_chars,omitempty"`
+	IncludeContext bool   `json:"include_context,omitempty"`
 }
 type listInput struct {
 	PathPrefix string `json:"path_prefix,omitempty"`
@@ -158,7 +159,9 @@ type rebuildOutput struct {
 }
 
 func success() *protocol.CallToolResult {
-	return &protocol.CallToolResult{Content: []protocol.Content{}}
+	// Leaving Content unset lets the SDK emit a JSON text projection of the
+	// structured result for clients that do not consume structuredContent.
+	return &protocol.CallToolResult{}
 }
 
 type runtimeState struct {
@@ -270,8 +273,11 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	}
 	_, _ = svc.RebuildAsync(context.Background())
 	server := protocol.NewServer(&protocol.Implementation{Name: "alist-docs", Version: "1.0.0"}, nil)
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_query", Description: "Recommended daily entry point: search plus compact context. match_mode is any (default; smart is accepted as a legacy alias), exact, or path. Use docs_read only when the returned context is insufficient."}, func(ctx context.Context, _ *protocol.CallToolRequest, in queryInput) (*protocol.CallToolResult, docs.QueryResult, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_query", Description: "Recommended daily entry point: search results include path, section_id, snippet, and revision. Set include_context=true only when a concatenated text context is needed. match_mode is all (default), any (broad recall; smart is a legacy alias), exact (literal content phrase), or path (literal relative document path). Use docs_read only when the returned snippet is insufficient."}, func(ctx context.Context, _ *protocol.CallToolRequest, in queryInput) (*protocol.CallToolResult, docs.QueryResult, error) {
 		r, e := svc.Query(in.Query, in.PathPrefix, in.MatchMode, in.Limit, in.BudgetChars)
+		if !in.IncludeContext {
+			r.Context = ""
+		}
 		return success(), r, e
 	})
 	if false { // retired low-level tools; retained temporarily only as implementation reference
@@ -286,11 +292,11 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 			return success(), r, e
 		})
 	}
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List Markdown documents. path_prefix is optional; limit is 1-100 and cursor is returned as next_cursor."}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List Markdown documents. path_prefix is optional; limit is 1-100. Pass next_cursor, which is the last returned relative path, to continue."}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
 		r, e := svc.List(ctx, in.PathPrefix, in.Cursor, in.Limit)
 		return success(), listOutput(r), e
 	})
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read one document. Set section_id for a matching query section, outline=true for headings, or offset/limit for a UTF-8-safe page. adjacent is 0-5 and applies to section_id."}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, documentOutput, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read one document. With no section_id or outline, returns the first UTF-8-safe 4096-byte page and next_offset when truncated. Set section_id for a matching query section, outline=true for headings, or offset/limit for a page. adjacent defaults to 0 and is 0-5."}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, documentOutput, error) {
 		if in.Outline {
 			r, e := svc.Outline(ctx, in.Path)
 			return success(), documentOutput{Path: r.Path, Revision: r.Revision, Sections: r.Sections}, e
