@@ -3,9 +3,11 @@ package docs
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "github.com/alist-org/alist/v3/drivers/local"
 	"github.com/alist-org/alist/v3/internal/conf"
@@ -103,6 +105,25 @@ func TestReadTruncatesUTF8AtCharacterBoundary(t *testing.T) {
 	next, err := svc.Read(context.Background(), "README.md", page.NextOffset, 3)
 	require.NoError(t, err)
 	require.Equal(t, "益", next.Content)
+}
+
+func TestReadAlignsOffsetInsideUTF8Character(t *testing.T) {
+	svc := setupListService(t)
+	before, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "a益b", &before.Revision)
+	require.NoError(t, err)
+
+	page, err := svc.Read(context.Background(), "README.md", 2, 1)
+	require.NoError(t, err)
+	require.Equal(t, "益", page.Content)
+}
+
+func TestReadInvalidOffsetReportsValidRange(t *testing.T) {
+	svc := setupListService(t)
+	_, err := svc.Read(context.Background(), "README.md", 99, 1)
+	require.ErrorContains(t, err, "invalid_document_offset")
+	require.ErrorContains(t, err, "0..4")
 }
 
 func TestReadPaginatesCanonicalizedGB18030Document(t *testing.T) {
@@ -213,6 +234,121 @@ func TestOutlineAndAppendAvoidFullDocumentEdits(t *testing.T) {
 	require.Equal(t, len("intro"), outline.Sections[0].Chars)
 	_, err = svc.Append(context.Background(), "README.md", "section-1", "more", outline.Revision)
 	require.NoError(t, err)
+}
+
+func TestAppendWithoutSectionAddsContentAtDocumentEnd(t *testing.T) {
+	svc := setupListService(t)
+	current, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+
+	_, err = svc.Append(context.Background(), "README.md", "", "tail", current.Revision)
+	require.NoError(t, err)
+
+	updated, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, "root\ntail", updated.Content)
+}
+
+func TestAppendToEmptyDocumentDoesNotAddLeadingNewline(t *testing.T) {
+	svc := setupListService(t)
+	current, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	revision, err := svc.Update(context.Background(), "README.md", "", &current.Revision)
+	require.NoError(t, err)
+
+	_, err = svc.Append(context.Background(), "README.md", "", "tail", revision)
+	require.NoError(t, err)
+	updated, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, "tail", updated.Content)
+}
+
+func TestAppendUnknownSectionSuggestsValidCorrection(t *testing.T) {
+	svc := setupListService(t)
+	current, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+
+	_, err = svc.Append(context.Background(), "README.md", "missing-section", "tail", current.Revision)
+	require.ErrorContains(t, err, "document_section_not_found")
+	require.ErrorContains(t, err, "section_id")
+	require.ErrorContains(t, err, "omit")
+}
+
+func TestReadCursorPaginatesAndRejectsStaleRevision(t *testing.T) {
+	type cursorReader interface {
+		ReadWithCursor(context.Context, string, string, int64) (ReadResult, error)
+	}
+	svc := setupListService(t)
+	reader, ok := any(svc).(cursorReader)
+	require.True(t, ok, "service should expose cursor-based pagination")
+
+	current, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "a益", &current.Revision)
+	require.NoError(t, err)
+
+	first, err := reader.ReadWithCursor(context.Background(), "README.md", "", 2)
+	require.NoError(t, err)
+	require.Equal(t, "a", first.Content)
+	firstCursor := readCursorFromResult(t, first)
+	require.NotEmpty(t, firstCursor)
+	second, err := reader.ReadWithCursor(context.Background(), "README.md", firstCursor, 2)
+	require.NoError(t, err)
+	require.Equal(t, "益", second.Content)
+	require.Empty(t, readCursorFromResult(t, second))
+
+	_, err = svc.Update(context.Background(), "README.md", "changed", &first.Revision)
+	require.NoError(t, err)
+	_, err = reader.ReadWithCursor(context.Background(), "README.md", firstCursor, 2)
+	require.ErrorContains(t, err, "document_cursor_expired")
+	require.ErrorContains(t, err, "expired")
+}
+
+func readCursorFromResult(t *testing.T, result ReadResult) string {
+	t.Helper()
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	var output map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &output))
+	cursor, _ := output["next_cursor"].(string)
+	return cursor
+}
+
+func TestQueryFallsBackToPartialChineseMatches(t *testing.T) {
+	svc := setupListService(t)
+	current, err := svc.Read(context.Background(), "README.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "README.md", "# 司机接单页\n\n派车号操作说明", &current.Revision)
+	require.NoError(t, err)
+	require.NoError(t, svc.Rebuild(context.Background()))
+
+	result, err := svc.Query("司机接单页 派车号 装点维护", "", "all", 10, 1600)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Results)
+	require.Equal(t, "README.md", result.Results[0].Path)
+}
+
+func TestQueryFallsBackAfterDiscardingStaleStrictMatches(t *testing.T) {
+	svc := setupListService(t)
+	intro, err := svc.Read(context.Background(), "guides/intro.md", 0, 0)
+	require.NoError(t, err)
+	_, err = svc.Update(context.Background(), "guides/intro.md", "司机接单页", &intro.Revision)
+	require.NoError(t, err)
+	err = svc.index.UpsertAt("README.md", "司机接单页 派车号 装点维护", "stale-revision", time.Now())
+	require.NoError(t, err)
+
+	result, err := svc.Query("司机接单页 派车号 装点维护", "", "all", 10, 1600)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Results)
+	require.Equal(t, "guides/intro.md", result.Results[0].Path)
+}
+
+func TestQueryNoResultsRecommendsDocumentDiscovery(t *testing.T) {
+	svc := setupListService(t)
+	result, err := svc.Query("no-such-document-term", "", "all", 10, 1600)
+	require.NoError(t, err)
+	require.Empty(t, result.Results)
+	require.Contains(t, result.RecommendedNext, "docs_list")
 }
 
 func TestInsertAfterEditsWithUniqueAnchor(t *testing.T) {

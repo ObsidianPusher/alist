@@ -5,7 +5,9 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -38,6 +40,13 @@ type ReadResult struct {
 	Size       int64  `json:"size"`
 	Truncated  bool   `json:"truncated"`
 	NextOffset int64  `json:"next_offset,omitempty"`
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+type readCursor struct {
+	Path     string `json:"p"`
+	Revision string `json:"r"`
+	Offset   int64  `json:"o"`
 }
 type HistoryResult struct {
 	Revision string `json:"revision"`
@@ -226,6 +235,44 @@ func (s *Service) ReadWithRevision(ctx context.Context, p string, offset, limit 
 	return result, nil
 }
 
+func (s *Service) ReadWithCursor(ctx context.Context, p, cursor string, limit int64) (ReadResult, error) {
+	offset := int64(0)
+	var cursorRevision string
+	if cursor != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+		if err != nil {
+			return ReadResult{}, fmt.Errorf("invalid_document_cursor: restart reading from the beginning")
+		}
+		var state readCursor
+		if err = json.Unmarshal(decoded, &state); err != nil || state.Path == "" || state.Revision == "" || state.Offset < 0 {
+			return ReadResult{}, fmt.Errorf("invalid_document_cursor: restart reading from the beginning")
+		}
+		if state.Path != p {
+			return ReadResult{}, fmt.Errorf("document_cursor_path_mismatch: cursor belongs to a different path; restart reading from the beginning")
+		}
+		offset, cursorRevision = state.Offset, state.Revision
+	}
+
+	result, err := s.ReadWithRevision(ctx, p, offset, limit, true)
+	if err != nil {
+		if cursor != "" {
+			return ReadResult{}, fmt.Errorf("invalid_document_cursor: restart reading from the beginning: %w", err)
+		}
+		return ReadResult{}, err
+	}
+	if cursorRevision != "" && result.Revision != cursorRevision {
+		return ReadResult{}, fmt.Errorf("document_cursor_expired: document changed; restart reading from the beginning")
+	}
+	if result.Truncated {
+		state, err := json.Marshal(readCursor{Path: p, Revision: result.Revision, Offset: result.NextOffset})
+		if err != nil {
+			return ReadResult{}, err
+		}
+		result.NextCursor = base64.RawURLEncoding.EncodeToString(state)
+	}
+	return result, nil
+}
+
 func (s *Service) loadCanonical(ctx context.Context, p, full string) (canonicalDocument, error) {
 	raw, _, truncated, err := s.readBytes(ctx, full, 0, 0)
 	if err != nil {
@@ -253,10 +300,10 @@ func (s *Service) loadCanonical(ctx context.Context, p, full string) (canonicalD
 
 func paginateUTF8(content []byte, offset, limit, max int64) ([]byte, int64, bool, error) {
 	if offset < 0 || limit < 0 || offset > int64(len(content)) {
-		return nil, 0, false, fmt.Errorf("invalid document offset or limit")
+		return nil, 0, false, fmt.Errorf("invalid_document_offset: offset must be within 0..%d and limit must be non-negative", len(content))
 	}
-	if offset < int64(len(content)) && !utf8.RuneStart(content[offset]) {
-		return nil, 0, false, fmt.Errorf("document offset must be at a UTF-8 character boundary")
+	for offset > 0 && offset < int64(len(content)) && !utf8.RuneStart(content[offset]) {
+		offset--
 	}
 	if limit == 0 || limit > max {
 		limit = max
@@ -272,7 +319,7 @@ func paginateUTF8(content []byte, offset, limit, max int64) ([]byte, int64, bool
 		_, size := utf8.DecodeRune(content[offset:])
 		end += int64(size)
 	}
-	return content[offset:end], end, true, nil
+	return content[offset:end], end, end < int64(len(content)), nil
 }
 
 func (s *Service) Update(ctx context.Context, p, content string, expected *string) (string, error) {
@@ -356,13 +403,20 @@ func (s *Service) Append(ctx context.Context, p, sectionID, content, expected st
 	if current.Revision != expected {
 		return "", &ConflictError{ActualRevision: current.Revision}
 	}
+	if sectionID == "" {
+		separator := "\n"
+		if current.Content == "" || strings.HasSuffix(current.Content, "\n") {
+			separator = ""
+		}
+		return s.Update(ctx, p, current.Content+separator+content, &expected)
+	}
 	for _, chunk := range ChunkMarkdown(current.Content, defaultChunkChars) {
 		if chunk.ID == sectionID {
 			next := current.Content[:chunk.End] + "\n" + content + current.Content[chunk.End:]
 			return s.Update(ctx, p, next, &expected)
 		}
 	}
-	return "", fmt.Errorf("document section not found")
+	return "", fmt.Errorf("document_section_not_found: section %q not found; provide a section_id from docs_read outline or omit section_id to append at document end", sectionID)
 }
 func (s *Service) InsertAfter(ctx context.Context, p, anchor, content, expected string) (string, error) {
 	if anchor == "" {
@@ -620,17 +674,26 @@ func (s *Service) Query(query, prefix, mode string, limit, budget int) (QueryRes
 	if err != nil {
 		return QueryResult{}, err
 	}
-	// The index is maintained separately from storage. Revalidate hits so an
-	// asynchronous/stale index can never surface deleted or superseded content.
-	live := results[:0]
-	for _, result := range results {
-		current, readErr := s.Read(context.Background(), result.Path, 0, 0)
-		if readErr != nil || current.Revision != result.Revision {
-			continue
+	validateLiveResults := func(results []SearchResult) []SearchResult {
+		live := make([]SearchResult, 0, len(results))
+		for _, result := range results {
+			current, readErr := s.Read(context.Background(), result.Path, 0, 0)
+			if readErr == nil && current.Revision == result.Revision {
+				live = append(live, result)
+			}
 		}
-		live = append(live, result)
+		return live
 	}
-	results = live
+	results = validateLiveResults(results)
+	fellBackToAny := false
+	if len(results) == 0 && (mode == "" || mode == "all") {
+		results, err = s.SearchMode(query, prefix, "any", limit)
+		if err != nil {
+			return QueryResult{}, err
+		}
+		results = validateLiveResults(results)
+		fellBackToAny = len(results) > 0
+	}
 	parts, used := make([]string, 0, len(results)), 0
 	for _, result := range results {
 		part := result.Path + "#" + result.SectionID + "\n" + result.Snippet
@@ -644,6 +707,11 @@ func (s *Service) Query(query, prefix, mode string, limit, budget int) (QueryRes
 		parts, used = append(parts, string(r)), used+len(r)
 	}
 	next := "Results include compact context. Use docs_read with path and section_id only when more detail is needed."
+	if fellBackToAny {
+		next = "No full-term match was found; results use partial-term matching. Refine the query or set match_mode=all for strict matching."
+	} else if len(results) == 0 {
+		next = "No documents matched. Retry with match_mode=any, remove path_prefix, or call docs_list with an empty path_prefix to discover available documents."
+	}
 	return QueryResult{Results: results, Context: strings.Join(parts, "\n\n"), RecommendedNext: next}, nil
 }
 func (s *Service) Context(query, prefix string, budget int) (ContextResult, error) {

@@ -40,6 +40,7 @@ type listInput struct {
 }
 type readInput struct {
 	Path            string `json:"path"`
+	Cursor          string `json:"cursor,omitempty"`
 	Offset          int64  `json:"offset,omitempty"`
 	Limit           int64  `json:"limit,omitempty"`
 	IncludeRevision *bool  `json:"include_revision,omitempty"`
@@ -53,6 +54,7 @@ type documentOutput struct {
 	Content    string                `json:"content,omitempty"`
 	Truncated  bool                  `json:"truncated,omitempty"`
 	NextOffset int64                 `json:"next_offset,omitempty"`
+	NextCursor string                `json:"next_cursor,omitempty"`
 	Sections   []docs.OutlineSection `json:"sections,omitempty"`
 	Chunks     []docs.Chunk          `json:"chunks,omitempty"`
 }
@@ -273,7 +275,7 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 	}
 	_, _ = svc.RebuildAsync(context.Background())
 	server := protocol.NewServer(&protocol.Implementation{Name: "alist-docs", Version: "1.0.0"}, nil)
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_query", Description: "Recommended daily entry point: search results include path, section_id, snippet, and revision. Set include_context=true only when a concatenated text context is needed. match_mode is all (default), any (broad recall; smart is a legacy alias), exact (literal content phrase), or path (literal relative document path). Use docs_read only when the returned snippet is insufficient."}, func(ctx context.Context, _ *protocol.CallToolRequest, in queryInput) (*protocol.CallToolResult, docs.QueryResult, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_query", Description: "Recommended daily entry point: search results include path, section_id, snippet, and revision. Set include_context=true only when a concatenated text context is needed. match_mode is all (default), any (broad recall; smart is a legacy alias), exact (literal content phrase), or path (literal relative document path). If no results are found, try any or call docs_list with an empty path_prefix to discover documents. Use docs_read only when the returned snippet is insufficient."}, func(ctx context.Context, _ *protocol.CallToolRequest, in queryInput) (*protocol.CallToolResult, docs.QueryResult, error) {
 		r, e := svc.Query(in.Query, in.PathPrefix, in.MatchMode, in.Limit, in.BudgetChars)
 		if !in.IncludeContext {
 			r.Context = ""
@@ -292,11 +294,14 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 			return success(), r, e
 		})
 	}
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List Markdown documents. path_prefix is optional; limit is 1-100. Pass next_cursor, which is the last returned relative path, to continue."}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_list", Description: "List Markdown documents. path_prefix is optional; leave it empty to discover documents across all directories. limit is 1-100. Pass next_cursor to continue."}, func(ctx context.Context, _ *protocol.CallToolRequest, in listInput) (*protocol.CallToolResult, listOutput, error) {
 		r, e := svc.List(ctx, in.PathPrefix, in.Cursor, in.Limit)
 		return success(), listOutput(r), e
 	})
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read one document. With no section_id or outline, returns the first UTF-8-safe 4096-byte page and next_offset when truncated. Set section_id for a matching query section, outline=true for headings, or offset/limit for a page. adjacent defaults to 0 and is 0-5."}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, documentOutput, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_read", Description: "Read one document. The first page is UTF-8-safe and returns next_cursor when truncated; pass that cursor to continue. offset/limit remains supported for compatibility. Offsets inside a UTF-8 character are rounded back to that character's start. Set section_id for a matching query section or outline=true for headings. adjacent defaults to 0 and is 0-5."}, func(ctx context.Context, _ *protocol.CallToolRequest, in readInput) (*protocol.CallToolResult, documentOutput, error) {
+		if in.Cursor != "" && (in.Offset != 0 || in.SectionID != "" || in.Outline) {
+			return success(), documentOutput{}, fmt.Errorf("cursor cannot be combined with offset, section_id, or outline")
+		}
 		if in.Outline {
 			r, e := svc.Outline(ctx, in.Path)
 			return success(), documentOutput{Path: r.Path, Revision: r.Revision, Sections: r.Sections}, e
@@ -312,10 +317,19 @@ func newRuntime(config conf.MCPConfig) (*runtimeState, error) {
 		if in.IncludeRevision != nil {
 			includeRevision = *in.IncludeRevision
 		}
-		r, e := svc.ReadWithRevision(ctx, in.Path, in.Offset, in.Limit, includeRevision)
-		return success(), documentOutput{Path: in.Path, Revision: r.Revision, Content: r.Content, Truncated: r.Truncated, NextOffset: r.NextOffset}, e
+		var r docs.ReadResult
+		var e error
+		if in.Offset == 0 {
+			r, e = svc.ReadWithCursor(ctx, in.Path, in.Cursor, in.Limit)
+			if !includeRevision {
+				r.Revision = ""
+			}
+		} else {
+			r, e = svc.ReadWithRevision(ctx, in.Path, in.Offset, in.Limit, includeRevision)
+		}
+		return success(), documentOutput{Path: in.Path, Revision: r.Revision, Content: r.Content, Truncated: r.Truncated, NextOffset: r.NextOffset, NextCursor: r.NextCursor}, e
 	})
-	protocol.AddTool(server, &protocol.Tool{Name: "docs_edit", Description: "Edit one document with revision protection. kind=create creates a new path without a revision; kind=update, replace, append, insert_after, section_update, patch, delete, and move require expected_revision."}, func(ctx context.Context, _ *protocol.CallToolRequest, in editInput) (*protocol.CallToolResult, map[string]string, error) {
+	protocol.AddTool(server, &protocol.Tool{Name: "docs_edit", Description: "Edit one document with revision protection. kind=create creates a new path without a revision; kind=update, replace, append, insert_after, section_update, patch, delete, and move require expected_revision. append without section_id adds content at document end; with section_id it inserts after that section."}, func(ctx context.Context, _ *protocol.CallToolRequest, in editInput) (*protocol.CallToolResult, map[string]string, error) {
 		var revision string
 		var err error
 		expected, expectedErr := requiredRevision(in.ExpectedRevision)
