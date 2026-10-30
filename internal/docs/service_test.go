@@ -322,10 +322,11 @@ func TestQueryFallsBackToPartialChineseMatches(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, svc.Rebuild(context.Background()))
 
-	result, err := svc.Query("司机接单页 派车号 装点维护", "", "all", 10, 1600)
+	result, err := svc.Query("司机接单页 派车号 装点维护", "", "", 10, 1600)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Results)
 	require.Equal(t, "README.md", result.Results[0].Path)
+	require.Contains(t, result.RecommendedNext, "partial-term matching")
 }
 
 func TestQueryFallsBackAfterDiscardingStaleStrictMatches(t *testing.T) {
@@ -337,10 +338,11 @@ func TestQueryFallsBackAfterDiscardingStaleStrictMatches(t *testing.T) {
 	err = svc.index.UpsertAt("README.md", "司机接单页 派车号 装点维护", "stale-revision", time.Now())
 	require.NoError(t, err)
 
-	result, err := svc.Query("司机接单页 派车号 装点维护", "", "all", 10, 1600)
+	result, err := svc.Query("司机接单页 派车号 装点维护", "", "", 10, 1600)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Results)
 	require.Equal(t, "guides/intro.md", result.Results[0].Path)
+	require.Contains(t, result.RecommendedNext, "partial-term matching")
 }
 
 func TestQueryNoResultsRecommendsDocumentDiscovery(t *testing.T) {
@@ -349,6 +351,28 @@ func TestQueryNoResultsRecommendsDocumentDiscovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, result.Results)
 	require.Contains(t, result.RecommendedNext, "docs_list")
+}
+
+func TestQueryExplicitAllDoesNotFallBack(t *testing.T) {
+	svc := setupListService(t)
+	require.NoError(t, svc.Rebuild(context.Background()))
+	result, err := svc.Query("root missingterm", "", "all", 10, 1600)
+	require.NoError(t, err)
+	require.Empty(t, result.Results)
+}
+
+func TestQueryNoResultsDoesNotRecommendCurrentMode(t *testing.T) {
+	svc := setupListService(t)
+	for _, mode := range []string{"all", "any", "smart", "exact", "path"} {
+		result, err := svc.Query("no-such-document-term", "", mode, 10, 1600)
+		require.NoError(t, err)
+		require.Empty(t, result.Results)
+		require.NotContains(t, result.RecommendedNext, "match_mode="+mode)
+		if mode == "smart" {
+			require.NotContains(t, result.RecommendedNext, "match_mode=any")
+		}
+		require.NotContains(t, result.RecommendedNext, "remove path_prefix")
+	}
 }
 
 func TestInsertAfterEditsWithUniqueAnchor(t *testing.T) {

@@ -686,7 +686,7 @@ func (s *Service) Query(query, prefix, mode string, limit, budget int) (QueryRes
 	}
 	results = validateLiveResults(results)
 	fellBackToAny := false
-	if len(results) == 0 && (mode == "" || mode == "all") {
+	if len(results) == 0 && mode == "" {
 		results, err = s.SearchMode(query, prefix, "any", limit)
 		if err != nil {
 			return QueryResult{}, err
@@ -710,7 +710,14 @@ func (s *Service) Query(query, prefix, mode string, limit, budget int) (QueryRes
 	if fellBackToAny {
 		next = "No full-term match was found; results use partial-term matching. Refine the query or set match_mode=all for strict matching."
 	} else if len(results) == 0 {
-		next = "No documents matched. Retry with match_mode=any, remove path_prefix, or call docs_list with an empty path_prefix to discover available documents."
+		next = "No documents matched. Refine the search terms"
+		if mode != "any" && mode != "smart" && mode != "" {
+			next += ", try match_mode=any"
+		}
+		if prefix != "" {
+			next += ", remove path_prefix"
+		}
+		next += ", or call docs_list with an empty path_prefix to discover available documents."
 	}
 	return QueryResult{Results: results, Context: strings.Join(parts, "\n\n"), RecommendedNext: next}, nil
 }
